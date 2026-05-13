@@ -1,0 +1,1555 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"/>
+  <title>GeoAR — AR Geometry Explorer</title>
+
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.7/aframe/build/aframe-ar.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+
+  <script>
+    // this script fixes the camera so it fills the screen correctly on mobile
+    var originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = function(constraints) {
+      if (constraints && constraints.video) {
+        constraints.video = {
+          facingMode: { exact: 'environment' },
+          width:  { ideal: 1280 },
+          height: { ideal: 720 },
+          zoom:   1.0
+        };
+      }
+      return originalGetUserMedia(constraints);
+    };
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0D1B2A;
+      --surface:  rgba(255,255,255,0.06);
+      --border:   rgba(255,255,255,0.12);
+      --blue:     #3B82F6;
+      --cyan:     #22D3EE;
+      --green:    #4ADE80;
+      --red:      #F87171;
+      --yellow:   #FBBF24;
+      --orange:   #FB923C;
+      --purple:   #A78BFA;
+      --pink:     #F472B6;
+      --text:     #F0F4FF;
+      --muted:    #6B7A99;
+      --panel:    rgba(13,27,42,0.96);
+    }
+
+    html, body {
+      overflow: hidden; width: 100%; height: 100%;
+      font-family: 'Nunito', sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+
+    /* camera and canvas layers */
+    video {
+      position: fixed !important; top: 0 !important; left: 0 !important;
+      width: 100vw !important; height: 100vh !important;
+      object-fit: cover !important; z-index: 0 !important;
+    }
+    canvas {
+      position: fixed !important; top: 0 !important; left: 0 !important;
+      width: 100vw !important; height: 100vh !important;
+      z-index: 1 !important; pointer-events: none !important;
+    }
+
+    /* main UI layer */
+    #ui {
+      position: fixed; top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 10; pointer-events: none;
+      display: flex; flex-direction: column;
+      justify-content: space-between;
+    }
+
+    /* ── TOP BAR ── */
+    .topbar {
+      pointer-events: all;
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--panel);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .app-logo {
+      font-size: 22px; font-weight: 900;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+
+    .topbar-right { display: flex; align-items: center; gap: 8px; }
+
+    .lang-btn {
+      background: linear-gradient(135deg, var(--cyan), var(--blue));
+      border: none; border-radius: 20px;
+      padding: 6px 14px;
+      font-family: 'Nunito', sans-serif;
+      font-size: 13px; font-weight: 800;
+      color: white; cursor: pointer;
+      transition: transform 0.15s, opacity 0.15s;
+      flex-shrink: 0;
+    }
+    .lang-btn:active { transform: scale(0.93); opacity: 0.85; }
+
+    .marker-pill {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px; letter-spacing: 0.5px;
+      padding: 5px 10px; border-radius: 100px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      transition: all 0.3s; white-space: nowrap;
+    }
+    .marker-pill.found {
+      color: var(--green);
+      border-color: rgba(74,222,128,0.5);
+      background: rgba(74,222,128,0.1);
+    }
+
+    /* ── SHAPE PICKER ── */
+    #shapePicker {
+      position: fixed; inset: 0;
+      background: var(--bg); z-index: 50;
+      display: flex; flex-direction: column;
+      align-items: center; overflow-y: auto;
+      padding-bottom: 24px;
+    }
+
+    .picker-header {
+      width: 100%; text-align: center;
+      padding: 28px 20px 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+
+    .picker-header h1 {
+      font-size: 32px; font-weight: 900;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, var(--cyan), var(--pink));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      margin-bottom: 6px;
+    }
+
+    .picker-header p { font-size: 13px; color: var(--muted); }
+
+    .shape-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 12px; width: 100%; max-width: 420px;
+      padding: 0 16px;
+    }
+
+    .shape-card {
+      background: var(--surface);
+      border: 2px solid var(--border);
+      border-radius: 20px;
+      padding: 22px 14px;
+      cursor: pointer; text-align: center;
+      pointer-events: all;
+      transition: all 0.2s;
+    }
+    .shape-card:active {
+      transform: scale(0.94);
+      border-color: var(--cyan);
+      background: rgba(34,211,238,0.1);
+    }
+
+    .shape-icon { font-size: 44px; margin-bottom: 10px; }
+    .shape-name { font-size: 15px; font-weight: 800; }
+    .shape-desc { font-size: 11px; color: var(--muted); margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
+
+    /* ── DIM PANEL ── */
+    #dimPanel {
+      position: fixed; inset: 0;
+      background: var(--bg); z-index: 49;
+      display: none; flex-direction: column;
+      padding: 20px; overflow-y: auto;
+    }
+
+    .dim-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+
+    .back-btn {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); border-radius: 12px;
+      padding: 9px 16px;
+      font-family: 'Nunito', sans-serif; font-size: 14px; font-weight: 700;
+      cursor: pointer; pointer-events: all;
+    }
+
+    .dim-icon  { font-size: 30px; }
+    .dim-title { font-size: 24px; font-weight: 900; letter-spacing: -0.5px; }
+
+    .input-group { margin-bottom: 14px; }
+    .input-group label {
+      display: block; font-weight: 700; font-size: 12px;
+      color: var(--muted); text-transform: uppercase;
+      letter-spacing: 1px; margin-bottom: 6px;
+    }
+    .input-group input {
+      width: 100%; background: var(--surface);
+      border: 2px solid var(--border); color: var(--text);
+      border-radius: 12px; padding: 13px 16px;
+      font-family: 'JetBrains Mono', monospace; font-size: 18px;
+      outline: none; transition: border-color 0.2s;
+    }
+    .input-group input:focus { border-color: var(--cyan); }
+
+    .launch-btn {
+      width: 100%; margin-top: 10px;
+      background: linear-gradient(135deg, var(--blue), var(--cyan));
+      color: white; border: none; border-radius: 16px; padding: 17px;
+      font-family: 'Nunito', sans-serif; font-size: 17px; font-weight: 900;
+      cursor: pointer; pointer-events: all;
+      transition: transform 0.1s, opacity 0.1s;
+    }
+    .launch-btn:active { transform: scale(0.97); opacity: 0.9; }
+
+    .formula-preview {
+      background: rgba(59,130,246,0.08);
+      border: 1px solid rgba(59,130,246,0.25);
+      border-radius: 14px; padding: 14px;
+      margin-top: 14px; font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; color: var(--muted); line-height: 1.9;
+    }
+
+    /* ── INFO PANEL ── */
+    #infoPanel {
+      pointer-events: all;
+      background: var(--panel);
+      backdrop-filter: blur(24px);
+      border-top: 1px solid var(--border);
+      height: 44vh; overflow-y: auto;
+    }
+
+    .panel-dragger {
+      display: flex; justify-content: center; align-items: center;
+      padding: 8px 0 5px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      cursor: ns-resize; touch-action: none; position: sticky; top: 0; z-index: 3;
+    }
+    .panel-dragger-bar {
+      width: 48px; height: 5px; border-radius: 999px;
+      background: rgba(255,255,255,0.2);
+    }
+
+    .info-tabs { display: flex; border-bottom: 1px solid var(--border); }
+    .info-tab {
+      flex: 1; background: transparent; border: none;
+      border-bottom: 3px solid transparent;
+      color: var(--muted);
+      font-family: 'Nunito', sans-serif; font-size: 12px; font-weight: 800;
+      padding: 10px 4px; cursor: pointer; text-align: center; transition: all 0.2s;
+    }
+    .info-tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+
+    .info-pane { display: none; padding: 14px 14px 20px; }
+    .info-pane.active { display: block; }
+
+    /* stat cards */
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 12px;
+    }
+    .stat-label { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; font-weight: 700; }
+    .stat-value { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 600; color: var(--cyan); }
+    .stat-unit  { font-size: 11px; color: var(--muted); }
+
+    /* formula steps */
+    .formula-step {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 13px 14px; margin-bottom: 8px;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.9;
+    }
+    .step-title   { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--orange); margin-bottom: 5px; font-weight: 700; }
+    .step-formula { color: var(--cyan); font-size: 13px; }
+    .step-result  { color: var(--green); margin-top: 4px; }
+
+    /* fact cards */
+    .fact-card {
+      background: rgba(167,139,250,0.08);
+      border: 1px solid rgba(167,139,250,0.25);
+      border-radius: 14px; padding: 13px 14px;
+      margin-bottom: 8px; font-size: 14px; font-weight: 600; line-height: 1.7;
+    }
+
+    /* ── QUIZ ── */
+    .quiz-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+    .quiz-pill {
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      border: 1px solid var(--border); border-radius: 100px;
+      padding: 6px 12px; background: var(--surface); color: var(--muted);
+    }
+    .quiz-pill.timer-warn { color: var(--red); border-color: rgba(248,113,113,0.5); }
+
+    .quiz-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 14px; margin-bottom: 10px;
+    }
+
+    .quiz-prompt {
+      font-size: 14px; font-weight: 700; line-height: 1.7;
+      margin-bottom: 14px; color: var(--text);
+    }
+
+    /* MCQ choices */
+    .quiz-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+    .quiz-choices.two-choices { grid-template-columns: 1fr 1fr; }
+    .quiz-choices.four-choices { grid-template-columns: 1fr 1fr; }
+    .quiz-choice {
+      background: rgba(255,255,255,0.05);
+      border: 2px solid var(--border);
+      border-radius: 14px; padding: 12px 10px;
+      font-family: 'Nunito', sans-serif; font-size: 14px; font-weight: 700;
+      color: var(--text); cursor: pointer; text-align: center;
+      transition: all 0.2s; pointer-events: all;
+    }
+    .quiz-choice:hover { border-color: var(--cyan); background: rgba(34,211,238,0.08); }
+    .quiz-choice.selected { border-color: var(--blue); background: rgba(59,130,246,0.15); }
+    .quiz-choice.correct  { border-color: var(--green) !important; background: rgba(74,222,128,0.15) !important; color: var(--green) !important; }
+    .quiz-choice.wrong    { border-color: var(--red)   !important; background: rgba(248,113,113,0.15) !important; color: var(--red) !important; }
+
+    .quiz-feedback {
+      font-size: 14px; font-weight: 800; min-height: 22px;
+      margin-top: 6px; text-align: center; transition: all 0.3s;
+    }
+    .quiz-feedback.ok   { color: var(--green); }
+    .quiz-feedback.bad  { color: var(--red); }
+    .quiz-feedback.warn { color: var(--yellow); }
+
+    .quiz-summary {
+      background: rgba(74,222,128,0.08);
+      border: 2px solid rgba(74,222,128,0.35);
+      border-radius: 14px; padding: 14px;
+      font-size: 14px; font-weight: 700; line-height: 1.8;
+      display: none; margin-top: 10px; text-align: center;
+    }
+
+    /* ── FEEDBACK OVERLAY (correct/wrong animation on screen) ── */
+    #feedbackOverlay {
+      position: fixed; inset: 0; z-index: 200;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none; opacity: 0;
+      transition: opacity 0.2s;
+    }
+    #feedbackOverlay.show { opacity: 1; }
+
+    .feedback-bubble {
+      font-size: 80px; font-weight: 900;
+      text-align: center; border-radius: 50%;
+      width: 160px; height: 160px;
+      display: flex; align-items: center; justify-content: center;
+      transform: scale(0.5);
+      transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    #feedbackOverlay.show .feedback-bubble { transform: scale(1); }
+    .feedback-bubble.correct { background: rgba(74,222,128,0.25); border: 4px solid var(--green); }
+    .feedback-bubble.wrong   { background: rgba(248,113,113,0.25); border: 4px solid var(--red); }
+
+    /* change shape button */
+    .change-btn {
+      width: 100%; margin-top: 10px;
+      background: transparent; border: 2px solid var(--border);
+      color: var(--muted); border-radius: 14px; padding: 11px;
+      font-family: 'Nunito', sans-serif; font-size: 14px; font-weight: 700;
+      cursor: pointer;
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body style="margin:0;overflow:hidden;">
+
+<!-- AR scene -->
+<a-scene
+  embedded
+  arjs="sourceType: webcam; debugUIEnabled: false; zoom: 1;"
+  vr-mode-ui="enabled: false"
+  renderer="logarithmicDepthBuffer: true;"
+>
+  <a-marker id="hiroMarker" preset="hiro" smooth="true" smoothCount="10" smoothTolerance="0.01" smoothThreshold="5">
+    <!-- shapeWrapper is what we rotate — text labels are separate so they don't distort -->
+    <a-entity id="shapeWrapper">
+      <a-entity id="shapeEntity"></a-entity>
+    </a-entity>
+    <!-- text labels are outside the wrapper so rotation never affects them -->
+    <a-text id="shapeLabel"  value="" align="center" color="#22D3EE" scale="0.7 0.7 0.7"  position="0 1.5 0"></a-text>
+    <a-text id="dimLabel"    value="" align="center" color="#ffffff"  scale="0.5 0.5 0.5"  position="0 1.25 0"></a-text>
+    <a-text id="resultLabel" value="" align="center" color="#4ADE80"  scale="0.5 0.5 0.5"  position="0 1.05 0"></a-text>
+  </a-marker>
+  <a-entity camera></a-entity>
+</a-scene>
+
+<!-- feedback overlay (shown on correct/wrong) -->
+<div id="feedbackOverlay">
+  <div class="feedback-bubble" id="feedbackBubble"></div>
+</div>
+
+<!-- main UI -->
+<div id="ui">
+  <div class="topbar">
+    <div class="app-logo">GeoAR</div>
+    <div class="topbar-right">
+      <button class="lang-btn" id="langBtn" onclick="toggleLang()">عربي</button>
+      <div class="marker-pill" id="markerPill">🔍 <span data-key="scanHint">Point at Hiro</span></div>
+    </div>
+  </div>
+
+  <div id="infoPanel" style="display:none">
+    <div class="panel-dragger" id="panelDragger"><div class="panel-dragger-bar"></div></div>
+    <div class="info-tabs">
+      <button class="info-tab active" data-tab="stats"    onclick="showTab('stats',this)">📊 <span data-key="tabStats">Stats</span></button>
+      <button class="info-tab"        data-tab="formulas" onclick="showTab('formulas',this)">📐 <span data-key="tabFormulas">Formulas</span></button>
+      <button class="info-tab"        data-tab="facts"    onclick="showTab('facts',this)">💡 <span data-key="tabFacts">Facts</span></button>
+      <button class="info-tab"        data-tab="quiz"     onclick="showTab('quiz',this)">🧠 <span data-key="tabQuiz">Quiz</span></button>
+    </div>
+    <div class="info-pane active" id="tab-stats">
+      <div class="stat-grid" id="statGrid"></div>
+      <button class="change-btn" onclick="changeShape()" data-key="changeShape">↩ Choose Different Shape</button>
+    </div>
+    <div class="info-pane" id="tab-formulas"><div id="formulaSteps"></div></div>
+    <div class="info-pane" id="tab-facts"><div id="factCards"></div></div>
+    <div class="info-pane" id="tab-quiz">
+      <div class="quiz-head">
+        <div class="quiz-pill" id="quizProgress">Q 0/5</div>
+        <div class="quiz-pill" id="quizScore">⭐ 0</div>
+        <div class="quiz-pill" id="quizTimer">⏱ 05:00</div>
+      </div>
+      <div class="quiz-card">
+        <div class="quiz-prompt" id="quizPrompt">Loading question…</div>
+        <div class="quiz-choices" id="quizChoices"></div>
+        <div class="quiz-feedback" id="quizFeedback"></div>
+      </div>
+      <div class="quiz-summary" id="quizSummary"></div>
+      <button class="quiz-retry" id="quizRetryBtn" onclick="retryQuiz()" style="display:none;width:100%;margin-top:10px;background:linear-gradient(135deg,var(--blue),var(--cyan));color:white;border:none;border-radius:14px;padding:14px;font-family:'Nunito',sans-serif;font-size:15px;font-weight:900;cursor:pointer;" data-key="retryQuiz">🔄 Try Again</button>
+    </div>
+  </div>
+</div>
+
+<!-- shape picker -->
+<div id="shapePicker">
+  <div class="picker-header">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="lang-btn" onclick="toggleLang()" id="langBtnPicker">عربي</button>
+    </div>
+    <h1>GeoAR</h1>
+    <p data-key="pickerSubtitle">AR Geometry Explorer · Point at Hiro marker</p>
+  </div>
+  <div class="shape-grid">
+    <div class="shape-card" onclick="selectShape('cube')">
+      <div class="shape-icon">🟦</div>
+      <div class="shape-name" data-key="shapeCube">Cube</div>
+      <div class="shape-desc" data-key="descCube">6 equal faces</div>
+    </div>
+    <div class="shape-card" onclick="selectShape('sphere')">
+      <div class="shape-icon">🟠</div>
+      <div class="shape-name" data-key="shapeSphere">Sphere</div>
+      <div class="shape-desc" data-key="descSphere">perfectly round</div>
+    </div>
+    <div class="shape-card" onclick="selectShape('cylinder')">
+      <div class="shape-icon">🥫</div>
+      <div class="shape-name" data-key="shapeCylinder">Cylinder</div>
+      <div class="shape-desc" data-key="descCylinder">2 circular bases</div>
+    </div>
+    <div class="shape-card" onclick="selectShape('cone')">
+      <div class="shape-icon">🍦</div>
+      <div class="shape-name" data-key="shapeCone">Cone</div>
+      <div class="shape-desc" data-key="descCone">pointed apex</div>
+    </div>
+    <div class="shape-card" onclick="selectShape('pyramid')">
+      <div class="shape-icon">🔺</div>
+      <div class="shape-name" data-key="shapePyramid">Pyramid</div>
+      <div class="shape-desc" data-key="descPyramid">4 triangular faces</div>
+    </div>
+    <div class="shape-card" onclick="selectShape('torus')">
+      <div class="shape-icon">🍩</div>
+      <div class="shape-name" data-key="shapeTorus">Torus</div>
+      <div class="shape-desc" data-key="descTorus">3D ring shape</div>
+    </div>
+    <div class="shape-card" onclick="selectShape('rectangle')">
+      <div class="shape-icon">🟥</div>
+      <div class="shape-name" data-key="shapeCuboid">Cuboid</div>
+      <div class="shape-desc" data-key="descCuboid">3 different sides</div>
+    </div>
+    <div class="shape-card" onclick="selectShape('prism')">
+      <div class="shape-icon">🔷</div>
+      <div class="shape-name" data-key="shapePrism">Tri. Prism</div>
+      <div class="shape-desc" data-key="descPrism">triangle base</div>
+    </div>
+  </div>
+</div>
+
+<!-- dimension input screen -->
+<div id="dimPanel">
+  <div class="dim-header">
+    <button class="back-btn" onclick="goBack()">← <span data-key="back">Back</span></button>
+    <div class="dim-icon" id="dimIcon"></div>
+    <div class="dim-title" id="dimTitle"></div>
+    <button class="lang-btn" onclick="toggleLang()" style="margin-left:auto;flex-shrink:0">عربي</button>
+  </div>
+  <div id="dimInputs"></div>
+  <div class="formula-preview" id="formulaPreview"></div>
+  <button class="launch-btn" onclick="launchShape()" data-key="launchBtn">🚀 Launch in AR</button>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// LANGUAGE SYSTEM
+// ─────────────────────────────────────────────
+let currentLang = 'en';
+
+const TRANSLATIONS = {
+  en: {
+    pickerSubtitle:  'AR Geometry Explorer · Point at Hiro marker',
+    scanHint: 'Point at Hiro', markerFound: '✓ Detected!',
+    shapeCube: 'Cube', shapeSphere: 'Sphere', shapeCylinder: 'Cylinder',
+    shapeCone: 'Cone', shapePyramid: 'Pyramid', shapeTorus: 'Torus',
+    shapeCuboid: 'Cuboid', shapePrism: 'Tri. Prism',
+    descCube:'6 equal faces', descSphere:'perfectly round', descCylinder:'2 circular bases',
+    descCone:'pointed apex', descPyramid:'4 triangular faces', descTorus:'3D ring shape',
+    descCuboid:'3 different sides', descPrism:'triangle base',
+    tabStats: 'Stats', tabFormulas: 'Formulas', tabFacts: 'Facts', tabQuiz: 'Quiz',
+    changeShape: '↩ Choose Different Shape',
+    back: 'Back', launchBtn: '🚀 Launch in AR',
+    quizCorrect: '🎉 Correct!', quizWrong: (a) => `❌ Answer: ${a}`,
+    quizDone: (s, t) => `Quiz done! Score: ${s}/5 · Time: ${t}`,
+    quizTimeUp: '⏰ Time is up!', startQuizHint: 'Tap the Quiz tab to start!',
+    retryQuiz: '🔄 Try Again',
+  },
+  ar: {
+    pickerSubtitle:  'استكشف الأشكال الهندسية بالواقع المعزز · وجّه الكاميرا للماركر',
+    scanHint: 'وجّه الكاميرا نحو الماركر', markerFound: '✓ تم الكشف!',
+    shapeCube: 'مكعب', shapeSphere: 'كرة', shapeCylinder: 'أسطوانة',
+    shapeCone: 'مخروط', shapePyramid: 'هرم', shapeTorus: 'حلقي',
+    shapeCuboid: 'متوازي مستطيلات', shapePrism: 'منشور مثلثي',
+    descCube:'6 أوجه متساوية', descSphere:'كروي تمامًا', descCylinder:'قاعدتان دائريتان',
+    descCone:'قمة مدببة', descPyramid:'4 أوجه مثلثية', descTorus:'حلقة ثلاثية الأبعاد',
+    descCuboid:'3 أضلاع مختلفة', descPrism:'قاعدة مثلثية',
+    tabStats: 'إحصاءات', tabFormulas: 'المعادلات', tabFacts: 'حقائق', tabQuiz: 'اختبار',
+    changeShape: '↩ اختر شكلاً آخر',
+    back: 'رجوع', launchBtn: '🚀 أطلق في الواقع المعزز',
+    quizCorrect: '🎉 إجابة صحيحة!', quizWrong: (a) => `❌ الإجابة: ${a}`,
+    quizDone: (s, t) => `انتهى الاختبار! النتيجة: ${s}/5 · الوقت: ${t}`,
+    quizTimeUp: '⏰ انتهى الوقت!', startQuizHint: 'اضغط على تبويب الاختبار للبدء!',
+    retryQuiz: '🔄 حاول مجددًا',
+  }
+};
+
+function t(key, ...args) {
+  const val = TRANSLATIONS[currentLang][key];
+  return typeof val === 'function' ? val(...args) : (val || key);
+}
+
+function applyLang() {
+  const isAr = currentLang === 'ar';
+  document.documentElement.lang = currentLang;
+  document.documentElement.dir  = isAr ? 'rtl' : 'ltr';
+
+  // update ALL lang buttons on every page
+  document.querySelectorAll('.lang-btn').forEach(b => {
+    b.textContent = isAr ? 'English' : 'عربي';
+  });
+
+  // update all data-key text elements
+  document.querySelectorAll('[data-key]').forEach(el => {
+    const k = el.getAttribute('data-key');
+    if (TRANSLATIONS[currentLang][k] && typeof TRANSLATIONS[currentLang][k] === 'string') {
+      el.textContent = TRANSLATIONS[currentLang][k];
+    }
+  });
+
+  // update marker pill
+  const pill = document.getElementById('markerPill');
+  const found = pill.classList.contains('found');
+  pill.innerHTML = (found ? '✓ ' : '🔍 ') + t(found ? 'markerFound' : 'scanHint');
+
+  // if dim panel is open rebuild in new language
+  if (document.getElementById('dimPanel').style.display !== 'none' && selectedShape) {
+    const shape = SHAPES[selectedShape];
+    document.getElementById('dimTitle').textContent = shape.name[currentLang];
+    // rebuild input labels
+    shape.inputs.forEach(inp => {
+      const lbl = document.querySelector(`label[for="inp-${inp.key}"]`);
+      if (lbl) lbl.textContent = inp.label[currentLang];
+      else {
+        // fallback: rebuild all inputs
+        const inputsDiv = document.getElementById('dimInputs');
+        inputsDiv.innerHTML = '';
+        shape.inputs.forEach(i => {
+          inputsDiv.innerHTML += `<div class="input-group"><label>${i.label[currentLang]}</label><input type="number" id="inp-${i.key}" placeholder="${i.placeholder}" min="0.1" step="0.1" inputmode="decimal"/></div>`;
+        });
+        return;
+      }
+    });
+    // rebuild formula preview
+    const defaults = {};
+    shape.inputs.forEach(i => { defaults[i.key] = i.placeholder; });
+    document.getElementById('formulaPreview').innerHTML =
+      '<strong style="color:var(--orange);font-size:11px;letter-spacing:1px">' +
+      (currentLang === 'ar' ? 'المعادلات' : 'FORMULAS') +
+      '</strong><br/><br/>' +
+      shape.formulas(defaults).map(f => `${f.title[currentLang]}: ${f.formula}`).join('<br/>');
+  }
+
+  // if info panel is open, rebuild it in new language
+  if (document.getElementById('infoPanel').style.display !== 'none' && selectedShape) {
+    buildInfoPanel();
+    // update AR floating text to new language
+    const shape = SHAPES[selectedShape];
+    document.getElementById('shapeLabel').setAttribute('value', shape.name[currentLang]);
+    document.getElementById('dimLabel').setAttribute('value',   shape.label(inputValues));
+    document.getElementById('resultLabel').setAttribute('value',shape.result(inputValues));
+    // if quiz is active, re-render the current question in new language immediately
+    if (quizStarted && !quizDone && quizList.length > 0 && quizIndex < quizList.length) {
+      renderQuestion();
+    }
+    // if quiz is done, update summary text in new language
+    if (quizDone) renderQuizSummary();
+  }
+}
+
+function toggleLang() {
+  currentLang = currentLang === 'en' ? 'ar' : 'en';
+  applyLang();
+}
+
+// ─────────────────────────────────────────────
+// SOUND ENGINE  (Web Audio API — no files needed)
+// ─────────────────────────────────────────────
+const AC = new (window.AudioContext || window.webkitAudioContext)();
+
+function playTone(freq, type, duration, vol) {
+  const osc  = AC.createOscillator();
+  const gain = AC.createGain();
+  osc.connect(gain); gain.connect(AC.destination);
+  osc.type = type || 'sine';
+  osc.frequency.setValueAtTime(freq, AC.currentTime);
+  gain.gain.setValueAtTime(vol || 0.3, AC.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + duration);
+  osc.start(); osc.stop(AC.currentTime + duration);
+}
+
+function soundCorrect() {
+  playTone(523, 'sine', 0.15, 0.3);
+  setTimeout(() => playTone(659, 'sine', 0.15, 0.3), 120);
+  setTimeout(() => playTone(784, 'sine', 0.25, 0.3), 240);
+}
+
+function soundWrong() {
+  playTone(220, 'sawtooth', 0.15, 0.25);
+  setTimeout(() => playTone(180, 'sawtooth', 0.3, 0.25), 150);
+}
+
+function soundLaunch() {
+  playTone(440, 'sine', 0.08, 0.2);
+  setTimeout(() => playTone(550, 'sine', 0.08, 0.2), 80);
+  setTimeout(() => playTone(660, 'sine', 0.2, 0.2), 160);
+}
+
+// ─────────────────────────────────────────────
+// FEEDBACK OVERLAY
+// ─────────────────────────────────────────────
+function showFeedbackOverlay(isCorrect) {
+  const overlay = document.getElementById('feedbackOverlay');
+  const bubble  = document.getElementById('feedbackBubble');
+  bubble.textContent = isCorrect ? '✅' : '❌';
+  bubble.className   = 'feedback-bubble ' + (isCorrect ? 'correct' : 'wrong');
+  overlay.classList.add('show');
+  setTimeout(() => overlay.classList.remove('show'), 900);
+}
+
+// ─────────────────────────────────────────────
+// SHAPES — Accurate 3D models
+// Key fix: ALL shapes use scale="1 1 1" and correct dimensions
+// A-Frame 1 unit = 1 meter. We divide cm by 100 to get meters.
+// e.g. 5cm cube → 0.05 units. This keeps proportions perfectly accurate.
+// ─────────────────────────────────────────────
+const CM = 0.07; // 1 cm = 0.07 A-Frame units — makes shapes visible and proportional
+
+const SHAPES = {
+
+  cube: {
+    name: { en: 'Cube', ar: 'مكعب' }, icon: '🟦',
+    inputs: [
+      { key:'a', label:{ en:'Side Length (cm)', ar:'طول الضلع (سم)' }, placeholder:'5' }
+    ],
+    // cube: width=height=depth=a — perfect cube every time
+    aframe: (v) => {
+      const s = +v.a * CM;
+      return `<a-box width="${s}" height="${s}" depth="${s}" color="#3B82F6" opacity="0.88" position="0 ${(s/2).toFixed(3)} 0" scale="1 1 1"></a-box>`;
+    },
+    stats: (v) => {
+      const a = +v.a;
+      return [
+        { label:{en:'Side',ar:'الضلع'},        value:a,                          unit:'cm'  },
+        { label:{en:'Volume',ar:'الحجم'},       value:Math.pow(a,3).toFixed(2),  unit:'cm³' },
+        { label:{en:'Surface Area',ar:'السطح'}, value:(6*a*a).toFixed(2),    unit:'cm²' },
+        { label:{en:'Diagonal',ar:'القطر'},     value:(a*Math.sqrt(3)).toFixed(2),unit:'cm' },
+        { label:{en:'Face Area',ar:'الوجه'}, value:(a*a).toFixed(2),         unit:'cm²' },
+        { label:{en:'Edges',ar:'الحواف'},       value:12,                        unit:''    },
+      ];
+    },
+    formulas: (v) => {
+      const a = +v.a;
+      return [
+        { title:{en:'Volume',ar:'الحجم'},         formula:`V = a³ = ${a}³`,         result:`= ${Math.pow(a,3).toFixed(2)} cm³` },
+        { title:{en:'Surface Area',ar:'السطح'},formula:`SA = 6a² = 6×${a}²`,     result:`= ${(6*a*a).toFixed(2)} cm²` },
+        { title:{en:'Face Diagonal',ar:'قطر الوجه'},formula:`d = a√2 = ${a}×√2`,  result:`= ${(a*Math.sqrt(2)).toFixed(2)} cm` },
+        { title:{en:'Space Diagonal',ar:'القطر الفضائي'},formula:`D = a√3 = ${a}×√3`, result:`= ${(a*Math.sqrt(3)).toFixed(2)} cm` },
+      ];
+    },
+    facts: {
+      en: [
+        '💡 A cube has 6 flat faces, 12 edges, and 8 corners. Every single face is a perfect square!',
+        '💡 A Rubik\'s Cube is a famous puzzle. It has more than 43 quintillion possible combinations!',
+        '💡 Ice cubes, dice, and sugar cubes are all cubes you see every day.',
+      ],
+      ar: [
+        '💡 للمكعب 6 أوجه مسطحة و12 حافة و8 زوايا، وكل وجه مربع تام!',
+        '💡 مكعب روبيك من أشهر الألعاب الذهنية في العالم، ويملك أكثر من 43 كوينتيليون تركيبة!',
+        '💡 مكعبات الثلج وقطع الزهر وقطع السكر — كلها أمثلة على المكعب من حياتنا اليومية.',
+      ],
+    },
+    quiz: (v) => {
+      const a = +v.a || 5;
+      return [
+        { q:{en:`A cube has side ${a} cm. What is its volume?`,ar:`مكعب ضلعه ${a} سم. ما حجمه؟`}, correct:Math.pow(a,3).toFixed(0)+' cm³', wrongs:[((a+1)**3).toFixed(0)+' cm³',((a-1)**3).toFixed(0)+' cm³',(6*a*a).toFixed(0)+' cm³'] },
+        { q:{en:`A cube has side ${a} cm. What is its surface area?`,ar:`مكعب ضلعه ${a} سم. ما مساحة سطحه؟`}, correct:(6*a*a).toFixed(0)+' cm²', wrongs:[(4*a*a).toFixed(0)+' cm²',(8*a*a).toFixed(0)+' cm²',(a*a*a).toFixed(0)+' cm³'] },
+        { q:{en:`How many faces does a cube have?`,ar:`كم وجهاً للمكعب؟`}, correct:'6', wrongs:['4','8','12'] },
+        { q:{en:`How many edges does a cube have?`,ar:`كم حافة للمكعب؟`}, correct:'12', wrongs:['6','8','10'] },
+        { q:{en:`How many corners (vertices) does a cube have?`,ar:`كم زاوية للمكعب؟`}, correct:'8', wrongs:['6','4','12'] },
+        { q:{en:`All faces of a cube are squares. True or False?`,ar:`جميع أوجه المكعب مربعات. صح أم خطأ؟`}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`The formula for cube volume is V = a³. True or False?`,ar:`معادلة حجم المكعب هي V = a³. صح أم خطأ؟`}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`A cube has side ${a} cm. What is the area of ONE face?`,ar:`مكعب ضلعه ${a} سم. ما مساحة وجه واحد؟`}, correct:(a*a).toFixed(0)+' cm²', wrongs:[(a*a*2).toFixed(0)+' cm²',(a*6).toFixed(0)+' cm²',(a*a*a).toFixed(0)+' cm³'] },
+      ];
+    },
+    shapeH: (v) => +v.a * CM,
+    label:  (v) => `a = ${v.a} cm`,
+    result: (v) => { const a=+v.a; return `V=${Math.pow(a,3).toFixed(1)}cm³`; },
+  },
+
+  sphere: {
+    name: { en: 'Sphere', ar: 'كرة' }, icon: '🔵',
+    inputs: [
+      { key:'r', label:{ en:'Radius (cm)', ar:'نصف القطر (سم)' }, placeholder:'4' }
+    ],
+    // sphere: radius = r — perfectly round in all directions
+    aframe: (v) => {
+      const r = +v.r * CM;
+      return `<a-sphere radius="${r}" color="#FB923C" opacity="0.88" position="0 ${r.toFixed(3)} 0" scale="1 1 1"></a-sphere>`;
+    },
+    stats: (v) => {
+      const r=+v.r, pi=Math.PI;
+      return [
+        { label:{en:'Radius',ar:'نصف القطر'},       value:r,                              unit:'cm'  },
+        { label:{en:'Diameter',ar:'القطر'},           value:(2*r).toFixed(2),              unit:'cm'  },
+        { label:{en:'Volume',ar:'الحجم'},             value:((4/3)*pi*r*r*r).toFixed(2),  unit:'cm³' },
+        { label:{en:'Surface Area',ar:'السطح'},    value:(4*pi*r*r).toFixed(2),         unit:'cm²' },
+        { label:{en:'Circumference',ar:'المحيط'},     value:(2*pi*r).toFixed(2),           unit:'cm'  },
+        { label:{en:'Great Circle',ar:'الدائرة الكبرى'}, value:(pi*r*r).toFixed(2),      unit:'cm²' },
+      ];
+    },
+    formulas: (v) => {
+      const r=+v.r, pi=Math.PI;
+      return [
+        { title:{en:'Volume',ar:'الحجم'},       formula:`V = (4/3)πr³ = (4/3)×π×${r}³`, result:`= ${((4/3)*pi*r*r*r).toFixed(2)} cm³` },
+        { title:{en:'Surface Area',ar:'السطح'}, formula:`SA = 4πr² = 4×π×${r}²`,   result:`= ${(4*pi*r*r).toFixed(2)} cm²` },
+        { title:{en:'Circumference',ar:'المحيط'}, formula:`C = 2πr = 2×π×${r}`,        result:`= ${(2*pi*r).toFixed(2)} cm` },
+        { title:{en:'Great Circle',ar:'الدائرة الكبرى'}, formula:`A = πr² = π×${r}²`, result:`= ${(pi*r*r).toFixed(2)} cm²` },
+      ];
+    },
+    facts: {
+      en: [
+        '💡 A sphere has no edges and no corners — it is perfectly smooth. Every point on its surface is the same distance from the center!',
+        '💡 Soap bubbles are always round because a sphere uses the least surface area to hold the most air inside.',
+        '💡 The Earth, Sun, and all planets are shaped like spheres. Gravity pulls everything into this shape!',
+      ],
+      ar: [
+        '💡 الكرة ليس لها حواف أو زوايا — كل نقطة على سطحها تبعد نفس المسافة عن المركز!',
+        '💡 فقاعات الصابون دائماً كروية الشكل لأن الكرة تحتوي على أكبر حجم بأقل مساحة سطح.',
+        '💡 الأرض والشمس وجميع الكواكب كروية الشكل — الجاذبية هي التي تجعلها كذلك!',
+      ],
+    },
+    quiz: (v) => {
+      const r=+v.r||4, pi=Math.PI;
+      return [
+        { q:{en:`A sphere has radius ${r} cm. What is its surface area? (Use π≈3.14)`,ar:`كرة نصف قطرها ${r} سم. ما مساحة سطحها؟ (استخدم π≈3.14)`}, correct:(4*pi*r*r).toFixed(0)+' cm²', wrongs:[(2*pi*r*r).toFixed(0)+' cm²', ((4/3)*pi*r*r*r).toFixed(0)+' cm³', (pi*r*r).toFixed(0)+' cm²'] },
+        { q:{en:`A sphere has NO edges. True or False?`,ar:`الكرة ليس لها حواف. صح أم خطأ؟`}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`What formula gives the volume of a sphere?`,ar:'ما معادلة حجم الكرة؟'}, correct:'(4/3)πr³', wrongs:['πr²h','4πr²','(1/3)πr²h'] },
+      ];
+    },
+    shapeH: (v) => +v.r * CM * 2,
+    label:  (v) => `r = ${v.r} cm`,
+    result: (v) => { const r=+v.r,pi=Math.PI; return `V=${((4/3)*pi*r*r*r).toFixed(1)}cm³`; },
+  },
+
+  cylinder: {
+    name: { en: 'Cylinder', ar: 'أسطوانة' }, icon: '🥫',
+    inputs: [
+      { key:'r', label:{ en:'Radius (cm)',  ar:'نصف القطر (سم)' }, placeholder:'3' },
+      { key:'h', label:{ en:'Height (cm)',  ar:'الارتفاع (سم)'  }, placeholder:'8' },
+    ],
+    // cylinder: radius = r, height = h — correct proportions
+    aframe: (v) => {
+      const r=+v.r*CM, h=+v.h*CM;
+      return `<a-cylinder radius="${r}" height="${h}" color="#4ADE80" opacity="0.88" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cylinder>`;
+    },
+    stats: (v) => {
+      const r=+v.r, h=+v.h, pi=Math.PI;
+      return [
+        { label:{en:'Radius',ar:'نصف القطر'},    value:r,                         unit:'cm'  },
+        { label:{en:'Height',ar:'الارتفاع'},     value:h,                         unit:'cm'  },
+        { label:{en:'Volume',ar:'الحجم'},        value:(pi*r*r*h).toFixed(2),     unit:'cm³' },
+        { label:{en:'Lateral Area',ar:'جانبية'}, value:(2*pi*r*h).toFixed(2), unit:'cm²' },
+        { label:{en:'Total SA',ar:'كلي'},    value:(2*pi*r*(r+h)).toFixed(2), unit:'cm²' },
+        { label:{en:'Base Area',ar:'القاعدة'}, value:(pi*r*r).toFixed(2),    unit:'cm²' },
+      ];
+    },
+    formulas: (v) => {
+      const r=+v.r, h=+v.h, pi=Math.PI;
+      return [
+        { title:{en:'Volume',ar:'الحجم'},              formula:`V = πr²h = π×${r}²×${h}`,       result:`= ${(pi*r*r*h).toFixed(2)} cm³` },
+        { title:{en:'Lateral Surface Area',ar:'جانبية'}, formula:`LSA = 2πrh = 2×π×${r}×${h}`, result:`= ${(2*pi*r*h).toFixed(2)} cm²` },
+        { title:{en:'Total Surface Area',ar:'كلي'}, formula:`TSA = 2πr(r+h)`,              result:`= ${(2*pi*r*(r+h)).toFixed(2)} cm²` },
+        { title:{en:'Base Area',ar:'القاعدة'},       formula:`A = πr² = π×${r}²`,            result:`= ${(pi*r*r).toFixed(2)} cm²` },
+      ];
+    },
+    facts: {
+      en: [
+        '💡 A cylinder has two flat circular faces on top and bottom, and one curved face around the side.',
+        '💡 Food cans, batteries, and candles are all cylinders. This shape is very strong and easy to stack!',
+        '💡 If you roll a flat rectangle into a tube, you get the curved side of a cylinder. Try it with paper!',
+      ],
+      ar: [
+        '💡 الأسطوانة لها وجهان دائريان مسطحان في الأعلى والأسفل، ووجه منحنٍ يلتف حولها.',
+        '💡 علب الطعام والبطاريات والشموع — كلها أسطوانات. هذا الشكل قوي جداً وسهل التكديس!',
+        '💡 إذا طويت ورقة مستطيلة إلى أنبوب، حصلت على الوجه الجانبي للأسطوانة — جربها!',
+      ],
+    },
+    quiz: (v) => {
+      const r=+v.r||3, h=+v.h||8, pi=Math.PI;
+      return [
+        { q:{en:`A cylinder has radius ${r} cm and height ${h} cm. What is its volume? (Use π≈3.14)`,ar:`أسطوانة نصف قطرها ${r} سم وارتفاعها ${h} سم. ما حجمها؟ (استخدم π≈3.14)`}, correct:(pi*r*r*h).toFixed(0)+' cm³', wrongs:[(2*pi*r*h).toFixed(0)+' cm²', (pi*r*r).toFixed(0)+' cm²', (pi*r*(r+h)).toFixed(0)+' cm²'] },
+        { q:{en:`How many flat faces does a cylinder have?`,ar:'كم وجهاً مسطحاً للأسطوانة؟'}, correct:'2', wrongs:['1','3','4'] },
+        { q:{en:`A cylinder's volume formula is πr²h. True or False?`,ar:'معادلة حجم الأسطوانة هي πr²h. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+      ];
+    },
+    shapeH: (v) => +v.h * CM,
+    label:  (v) => `r=${v.r}cm  h=${v.h}cm`,
+    result: (v) => { const r=+v.r,h=+v.h,pi=Math.PI; return `V=${(pi*r*r*h).toFixed(1)}cm³`; },
+  },
+
+  cone: {
+    name: { en: 'Cone', ar: 'مخروط' }, icon: '🍦',
+    inputs: [
+      { key:'r', label:{ en:'Base Radius (cm)', ar:'نصف قطر القاعدة (سم)' }, placeholder:'3' },
+      { key:'h', label:{ en:'Height (cm)',       ar:'الارتفاع (سم)'        }, placeholder:'7' },
+    ],
+    aframe: (v) => {
+      const r=+v.r*CM, h=+v.h*CM;
+      return `<a-cone radius-bottom="${r}" radius-top="0.001" height="${h}" color="#FB923C" opacity="0.88" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cone>`;
+    },
+    stats: (v) => {
+      const r=+v.r, h=+v.h, pi=Math.PI, l=Math.sqrt(r*r+h*h);
+      return [
+        { label:{en:'Radius',ar:'نصف القطر'},   value:r,                          unit:'cm'  },
+        { label:{en:'Height',ar:'الارتفاع'},    value:h,                          unit:'cm'  },
+        { label:{en:'Slant Height',ar:'الارتفاع المائل'}, value:l.toFixed(2),    unit:'cm'  },
+        { label:{en:'Volume',ar:'الحجم'},       value:((1/3)*pi*r*r*h).toFixed(2),unit:'cm³'},
+        { label:{en:'Lateral Area',ar:'جانبية'}, value:(pi*r*l).toFixed(2),  unit:'cm²' },
+        { label:{en:'Total SA',ar:'كلي'},   value:(pi*r*(r+l)).toFixed(2),   unit:'cm²' },
+      ];
+    },
+    formulas: (v) => {
+      const r=+v.r, h=+v.h, pi=Math.PI, l=Math.sqrt(r*r+h*h);
+      return [
+        { title:{en:'Slant Height (Pythagoras!)',ar:'الارتفاع المائل (فيثاغورس!)'}, formula:`l = √(r²+h²) = √(${r}²+${h}²)`, result:`= ${l.toFixed(2)} cm` },
+        { title:{en:'Volume',ar:'الحجم'},         formula:`V = (1/3)πr²h`,   result:`= ${((1/3)*pi*r*r*h).toFixed(2)} cm³` },
+        { title:{en:'Lateral Surface Area',ar:'جانبية'}, formula:`LSA = πrl`, result:`= ${(pi*r*l).toFixed(2)} cm²` },
+        { title:{en:'Total Surface Area',ar:'كلي'}, formula:`TSA = πr(r+l)`, result:`= ${(pi*r*(r+l)).toFixed(2)} cm²` },
+      ];
+    },
+    facts: {
+      en: [
+        '💡 A cone has one flat circular base and one pointed tip called the apex.',
+        '💡 Ice cream cones, party hats, and traffic cones are all real-life cones!',
+        '💡 To find the slant height of a cone we use the Pythagorean theorem — math connects everything!',
+      ],
+      ar: [
+        '💡 المخروط له قاعدة دائرية مسطحة وقمة مدببة تُسمى الرأس.',
+        '💡 أكواب الآيس كريم وقبعات الأعياد ومخاريط التحذير — كلها مخاريط من حياتنا!',
+        '💡 نستخدم نظرية فيثاغورس لإيجاد الارتفاع المائل للمخروط — الرياضيات تربط كل شيء!',
+      ],
+    },
+    quiz: (v) => {
+      const r=+v.r||3, h=+v.h||7, pi=Math.PI, l=Math.sqrt(r*r+h*h);
+      return [
+        { q:{en:`A cone has radius ${r} cm and height ${h} cm. What is its slant height?`,ar:`مخروط نصف قطره ${r} سم وارتفاعه ${h} سم. ما ارتفاعه المائل؟`}, correct:l.toFixed(1)+' cm', wrongs:[(h+1).toFixed(1)+' cm',(r+h).toFixed(1)+' cm',(l+2).toFixed(1)+' cm'] },
+        { q:{en:`A cone has volume = (1/3)πr²h. True or False?`,ar:'حجم المخروط = (1/3)πr²h. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`How many flat faces does a cone have?`,ar:'كم وجهاً مسطحاً للمخروط؟'}, correct:'1', wrongs:['2','3','0'] },
+      ];
+    },
+    shapeH: (v) => +v.h * CM,
+    label:  (v) => `r=${v.r}cm  h=${v.h}cm`,
+    result: (v) => { const r=+v.r,h=+v.h,pi=Math.PI,l=Math.sqrt(r*r+h*h); return `V=${((1/3)*pi*r*r*h).toFixed(1)}cm³  l=${l.toFixed(1)}cm`; },
+  },
+
+  pyramid: {
+    name: { en: 'Pyramid', ar: 'هرم' }, icon: '🔺',
+    inputs: [
+      { key:'b', label:{ en:'Base Side (cm)', ar:'ضلع القاعدة (سم)' }, placeholder:'6' },
+      { key:'h', label:{ en:'Height (cm)',    ar:'الارتفاع (سم)'    }, placeholder:'8' },
+    ],
+    // 4-sided pyramid using a-cone with segments-radial=4
+    aframe: (v) => {
+      const b=+v.b*CM*0.7, h=+v.h*CM;
+      return `<a-cone radius-bottom="${b}" radius-top="0.001" height="${h}" color="#FBBF24" opacity="0.88" segments-radial="4" position="0 ${(h/2).toFixed(3)} 0" rotation="0 45 0" scale="1 1 1"></a-cone>`;
+    },
+    stats: (v) => {
+      const b=+v.b, h=+v.h, sl=Math.sqrt(h*h+(b/2)*(b/2));
+      return [
+        { label:{en:'Base Side',ar:'ضلع القاعدة'}, value:b,                        unit:'cm'  },
+        { label:{en:'Height',ar:'الارتفاع'},       value:h,                        unit:'cm'  },
+        { label:{en:'Volume',ar:'الحجم'},          value:((1/3)*b*b*h).toFixed(2), unit:'cm³' },
+        { label:{en:'Base Area',ar:'القاعدة'},  value:(b*b).toFixed(2),         unit:'cm²' },
+        { label:{en:'Slant Height',ar:'الارتفاع المائل'}, value:sl.toFixed(2),     unit:'cm'  },
+        { label:{en:'Lateral Area',ar:'جانبية'}, value:(2*b*sl).toFixed(2),   unit:'cm²' },
+      ];
+    },
+    formulas: (v) => {
+      const b=+v.b, h=+v.h, sl=Math.sqrt(h*h+(b/2)*(b/2));
+      return [
+        { title:{en:'Slant Height',ar:'الارتفاع المائل'}, formula:`l = √(h²+(b/2)²)`, result:`= ${sl.toFixed(2)} cm` },
+        { title:{en:'Volume',ar:'الحجم'},         formula:`V = (1/3)b²h = (1/3)×${b}²×${h}`, result:`= ${((1/3)*b*b*h).toFixed(2)} cm³` },
+        { title:{en:'Lateral Surface Area',ar:'جانبية'}, formula:`LSA = 2bl`, result:`= ${(2*b*sl).toFixed(2)} cm²` },
+        { title:{en:'Total Surface Area',ar:'كلي'}, formula:`TSA = b² + 2bl`, result:`= ${(b*b+2*b*sl).toFixed(2)} cm²` },
+      ];
+    },
+    facts: {
+      en: [
+        '💡 A square pyramid has 5 faces — 1 square base and 4 triangles that meet at the top.',
+        '💡 The Great Pyramid of Giza was built over 4,500 years ago and was the tallest structure in the world for 3,800 years!',
+        '💡 A pyramid holds exactly one third of the volume of a box with the same base and height.',
+      ],
+      ar: [
+        '💡 للهرم الرباعي 5 أوجه — قاعدة مربعة و4 مثلثات تلتقي في القمة.',
+        '💡 الهرم الأكبر في الجيزة بُني منذ أكثر من 4500 عام وظل أطول بناء في العالم لـ3800 عام!',
+        '💡 حجم الهرم يساوي ثلث حجم المنشور الذي له نفس القاعدة والارتفاع.',
+      ],
+    },
+    quiz: (v) => {
+      const b=+v.b||6, h=+v.h||8;
+      return [
+        { q:{en:`A pyramid has base side ${b} cm and height ${h} cm. What is its volume?`,ar:`هرم قاعدته ${b} سم وارتفاعه ${h} سم. ما حجمه؟`}, correct:((1/3)*b*b*h).toFixed(0)+' cm³', wrongs:[(b*b*h).toFixed(0)+' cm³',((1/2)*b*b*h).toFixed(0)+' cm³',(b*b).toFixed(0)+' cm²'] },
+        { q:{en:`How many faces does a square pyramid have?`,ar:'كم وجهاً للهرم الرباعي؟'}, correct:'5', wrongs:['4','6','8'] },
+        { q:{en:`A pyramid's volume is 1/3 of a box with same base and height. True or False?`,ar:'حجم الهرم ثلث المنشور بنفس القاعدة والارتفاع. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+      ];
+    },
+    shapeH: (v) => +v.h * CM,
+    label:  (v) => `b=${v.b}cm  h=${v.h}cm`,
+    result: (v) => { const b=+v.b,h=+v.h; return `V=${((1/3)*b*b*h).toFixed(1)}cm³`; },
+  },
+
+  torus: {
+    name: { en: 'Torus', ar: 'حلقي' }, icon: '🍩',
+    inputs: [
+      { key:'R', label:{ en:'Major Radius (cm)', ar:'نصف القطر الكبير (سم)' }, placeholder:'5' },
+      { key:'r', label:{ en:'Minor Radius (cm)', ar:'نصف القطر الصغير (سم)' }, placeholder:'2' },
+    ],
+    aframe: (v) => {
+      const R=+v.R*CM, r=+v.r*CM;
+      return `<a-torus radius="${R}" radius-tubular="${r}" color="#A78BFA" opacity="0.88" position="0 ${r.toFixed(3)} 0" scale="1 1 1"></a-torus>`;
+    },
+    stats: (v) => {
+      const R=+v.R, r=+v.r, pi=Math.PI;
+      return [
+        { label:{en:'Major R',ar:'نصف القطر الكبير'}, value:R,                          unit:'cm'  },
+        { label:{en:'Minor r',ar:'نصف القطر الصغير'}, value:r,                          unit:'cm'  },
+        { label:{en:'Volume',ar:'الحجم'},              value:(2*pi*pi*R*r*r).toFixed(2), unit:'cm³' },
+        { label:{en:'Surface Area',ar:'السطح'},     value:(4*pi*pi*R*r).toFixed(2),   unit:'cm²' },
+        { label:{en:'Outer Radius',ar:'نصف القطر الخارجي'}, value:(R+r).toFixed(2),    unit:'cm'  },
+        { label:{en:'Inner Radius',ar:'نصف القطر الداخلي'}, value:Math.abs(R-r).toFixed(2), unit:'cm' },
+      ];
+    },
+    formulas: (v) => {
+      const R=+v.R, r=+v.r, pi=Math.PI;
+      return [
+        { title:{en:'Volume',ar:'الحجم'},       formula:`V = 2π²Rr² = 2×π²×${R}×${r}²`, result:`= ${(2*pi*pi*R*r*r).toFixed(2)} cm³` },
+        { title:{en:'Surface Area',ar:'السطح'}, formula:`SA = 4π²Rr = 4×π²×${R}×${r}`, result:`= ${(4*pi*pi*R*r).toFixed(2)} cm²` },
+        { title:{en:'Outer Diameter',ar:'القطر الخارجي'}, formula:`d = 2(R+r) = 2×(${R}+${r})`, result:`= ${(2*(R+r)).toFixed(2)} cm` },
+        { title:{en:'Inner Diameter',ar:'القطر الداخلي'}, formula:`d = 2(R-r) = 2×(${R}-${r})`, result:`= ${(2*Math.abs(R-r)).toFixed(2)} cm` },
+      ];
+    },
+    facts: {
+      en: [
+        '💡 A torus is a 3D ring shape. It is made by rotating a circle around an axis to form a ring.',
+        '💡 Bicycle tires, car tires, and Saturn\'s rings are all examples of torus shapes in real life.',
+        '💡 The major radius R is the distance from the center of the ring to the middle of the tube. The minor radius r is the thickness of the tube itself.',
+      ],
+      ar: [
+        '💡 الحلقي هي شكل حلقي ثلاثي الأبعاد، يُكوَّن بتدوير دائرة حول محور ليشكل حلقة.',
+        '💡 إطارات الدراجات والسيارات وحلقات زحل — كلها أمثلة حقيقية على شكل الحلقي.',
+        '💡 نصف القطر الكبير R هو المسافة من مركز الحلقة إلى منتصف الأنبوب، ونصف القطر الصغير r هو سُمك الأنبوب نفسه.',
+      ],
+    },
+    quiz: (v) => {
+      const R=+v.R||5, r=+v.r||2, pi=Math.PI;
+      return [
+        { q:{en:`What does the major radius R represent in a torus?`,ar:'ماذا يمثل نصف القطر الكبير R في الحلقي؟'}, correct:'DIST_CENTER', wrongs:['THICK_TUBE','RING_LEN','HALF_RING'] },
+        { q:{en:`A torus has R=${R} cm and r=${r} cm. What is its surface area? (Use π²≈9.87)`,ar:`حلقي لها R=${R} سم و r=${r} سم. ما مساحة سطحها؟ (استخدم π²≈9.87)`}, correct:(4*pi*pi*R*r).toFixed(0)+' cm²', wrongs:[(2*pi*pi*R*r*r).toFixed(0)+' cm³',(2*pi*R).toFixed(0)+' cm',(4*pi*R*r).toFixed(0)+' cm²'] },
+        { q:{en:`Bicycle tires are a real-life example of a torus shape. True or False?`,ar:'إطارات الدراجات مثال حقيقي على شكل الحلقي. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+      ];
+    },
+    shapeH: (v) => +v.r * CM * 2,
+    label:  (v) => `R=${v.R}cm  r=${v.r}cm`,
+    result: (v) => { const R=+v.R,r=+v.r,pi=Math.PI; return `V=${(2*pi*pi*R*r*r).toFixed(1)}cm³`; },
+  },
+
+  rectangle: {
+    name: { en: 'Cuboid', ar: 'متوازي مستطيلات' }, icon: '🟥',
+    inputs: [
+      { key:'l', label:{ en:'Length (cm)', ar:'الطول (سم)'  }, placeholder:'8' },
+      { key:'w', label:{ en:'Width (cm)',  ar:'العرض (سم)'  }, placeholder:'5' },
+      { key:'h', label:{ en:'Height (cm)', ar:'الارتفاع (سم)' }, placeholder:'4' },
+    ],
+    // cuboid: width=l, depth=w, height=h — all different, preserving exact shape
+    aframe: (v) => {
+      const l=+v.l*CM, w=+v.w*CM, h=+v.h*CM;
+      return `<a-box width="${l}" height="${h}" depth="${w}" color="#F472B6" opacity="0.88" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-box>`;
+    },
+    stats: (v) => {
+      const l=+v.l, w=+v.w, h=+v.h;
+      return [
+        { label:{en:'Length',ar:'الطول'},      value:l,                                  unit:'cm'  },
+        { label:{en:'Width',ar:'العرض'},        value:w,                                  unit:'cm'  },
+        { label:{en:'Height',ar:'الارتفاع'},   value:h,                                  unit:'cm'  },
+        { label:{en:'Volume',ar:'الحجم'},      value:(l*w*h).toFixed(2),                 unit:'cm³' },
+        { label:{en:'Surface Area',ar:'السطح'}, value:(2*(l*w+l*h+w*h)).toFixed(2), unit:'cm²' },
+        { label:{en:'Diagonal',ar:'القطر'},    value:Math.sqrt(l*l+w*w+h*h).toFixed(2), unit:'cm'  },
+      ];
+    },
+    formulas: (v) => {
+      const l=+v.l, w=+v.w, h=+v.h;
+      return [
+        { title:{en:'Volume',ar:'الحجم'},       formula:`V = l×w×h = ${l}×${w}×${h}`,        result:`= ${(l*w*h).toFixed(2)} cm³` },
+        { title:{en:'Surface Area',ar:'السطح'}, formula:`SA = 2(lw+lh+wh)`,             result:`= ${(2*(l*w+l*h+w*h)).toFixed(2)} cm²` },
+        { title:{en:'Space Diagonal (3D Pythagoras!)',ar:'القطر الفضائي (فيثاغورس 3D!)'}, formula:`d = √(l²+w²+h²)`, result:`= ${Math.sqrt(l*l+w*w+h*h).toFixed(2)} cm` },
+        { title:{en:'Face Diagonal',ar:'قطر الوجه'}, formula:`d_f = √(l²+w²)`,             result:`= ${Math.sqrt(l*l+w*w).toFixed(2)} cm` },
+      ];
+    },
+    facts: {
+      en: [
+        '💡 A cuboid is like a cube but its three sides can be different lengths. It has 6 faces, 12 edges, and 8 corners.',
+        '💡 Almost every box you have ever seen — a shoebox, cereal box, phone box — is a cuboid!',
+        '💡 To find the longest distance inside a cuboid we use 3D Pythagoras: d = √(l²+w²+h²)!',
+      ],
+      ar: [
+        '💡 متوازي المستطيلات كالمكعب لكن أضلاعه الثلاثة مختلفة. له 6 أوجه و12 حافة و8 زوايا.',
+        '💡 تقريباً كل صندوق رأيته في حياتك — صندوق أحذية أو حبوب الإفطار — هو متوازي مستطيلات!',
+        '💡 نستخدم فيثاغورس ثلاثي الأبعاد لإيجاد أطول مسافة داخل الشكل: d = √(l²+w²+h²)!',
+      ],
+    },
+    quiz: (v) => {
+      const l=+v.l||8, w=+v.w||5, h=+v.h||4;
+      return [
+        { q:{en:`A cuboid has l=${l}cm, w=${w}cm, h=${h}cm. What is its volume?`,ar:`متوازي مستطيلات: ط=${l}، ع=${w}، ار=${h} سم. ما حجمه؟`}, correct:(l*w*h).toFixed(0)+' cm³', wrongs:[(2*(l*w+l*h+w*h)).toFixed(0)+' cm²',(l*w+w*h).toFixed(0)+' cm²',(l+w+h).toFixed(0)+' cm'] },
+        { q:{en:`How many faces does a cuboid have?`,ar:'كم وجهاً لمتوازي المستطيلات؟'}, correct:'6', wrongs:['4','8','12'] },
+        { q:{en:`A cube is a special cuboid where all sides are equal. True or False?`,ar:'المكعب متوازي مستطيلات خاص تتساوى فيه جميع الأضلاع. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+      ];
+    },
+    shapeH: (v) => +v.h * CM,
+    label:  (v) => `${v.l} x ${v.w} x ${v.h} cm`,
+    result: (v) => { const l=+v.l,w=+v.w,h=+v.h; return `V=${(l*w*h).toFixed(1)}cm³`; },
+  },
+
+  prism: {
+    name: { en: 'Tri. Prism', ar: 'منشور مثلثي' }, icon: '🔷',
+    inputs: [
+      { key:'a', label:{ en:'Triangle Base (cm)',   ar:'قاعدة المثلث (سم)'  }, placeholder:'6' },
+      { key:'b', label:{ en:'Triangle Height (cm)', ar:'ارتفاع المثلث (سم)' }, placeholder:'5' },
+      { key:'l', label:{ en:'Prism Length (cm)',    ar:'طول المنشور (سم)'    }, placeholder:'9' },
+    ],
+    aframe: (v) => {
+      const r=+v.a*CM*0.6, h=+v.l*CM;
+      return `<a-cylinder radius="${r}" height="${h}" color="#22D3EE" opacity="0.88" segments-radial="3" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cylinder>`;
+    },
+    stats: (v) => {
+      const a=+v.a, b=+v.b, l=+v.l, tri=0.5*a*b, hyp=Math.sqrt(a*a+b*b);
+      return [
+        { label:{en:'Base',ar:'القاعدة'},       value:a,                 unit:'cm'  },
+        { label:{en:'Tri Height',ar:'ارت. المثلث'}, value:b,            unit:'cm'  },
+        { label:{en:'Length',ar:'الطول'},       value:l,                 unit:'cm'  },
+        { label:{en:'Volume',ar:'الحجم'},       value:(tri*l).toFixed(2),unit:'cm³' },
+        { label:{en:'Triangle Area',ar:'م. المثلث'}, value:tri.toFixed(2), unit:'cm²' },
+        { label:{en:'Hypotenuse',ar:'الوتر'},   value:hyp.toFixed(2),   unit:'cm'  },
+      ];
+    },
+    formulas: (v) => {
+      const a=+v.a, b=+v.b, l=+v.l, tri=0.5*a*b, hyp=Math.sqrt(a*a+b*b);
+      return [
+        { title:{en:'Triangle Area',ar:'مساحة المثلث'}, formula:`A = (1/2)×b×h = (1/2)×${a}×${b}`, result:`= ${tri.toFixed(2)} cm²` },
+        { title:{en:'Hypotenuse (Pythagoras!)',ar:'الوتر (فيثاغورس!)'}, formula:`c = √(a²+b²) = √(${a}²+${b}²)`, result:`= ${hyp.toFixed(2)} cm` },
+        { title:{en:'Volume',ar:'الحجم'}, formula:`V = A×l = ${tri.toFixed(2)}×${l}`, result:`= ${(tri*l).toFixed(2)} cm³` },
+        { title:{en:'Surface Area',ar:'السطح'}, formula:`SA = 2A + (a+b+c)×l`, result:`= ${(2*tri+(a+b+hyp)*l).toFixed(2)} cm²` },
+      ];
+    },
+    facts: {
+      en: [
+        '💡 A triangular prism has 5 faces — 2 triangles on the ends and 3 rectangles on the sides.',
+        '💡 When sunlight passes through a glass prism it splits into all the colors of the rainbow — just like how real rainbows form!',
+        '💡 The area of the triangle is ½ × base × height — one of the most important formulas in geometry!',
+      ],
+      ar: [
+        '💡 للمنشور المثلثي 5 أوجه — مثلثان على الطرفين و3 مستطيلات على الجوانب.',
+        '💡 عندما يمر ضوء الشمس عبر منشور زجاجي ينقسم إلى ألوان قوس قزح — هكذا تتشكل الأقواس الحقيقية!',
+        '💡 مساحة المثلث = ½ × القاعدة × الارتفاع — إحدى أهم المعادلات في الهندسة!',
+      ],
+    },
+    quiz: (v) => {
+      const a=+v.a||6, b=+v.b||5, l=+v.l||9, tri=0.5*a*b;
+      return [
+        { q:{en:`A triangle has base ${a} cm and height ${b} cm. What is its area?`,ar:`مثلث قاعدته ${a} سم وارتفاعه ${b} سم. ما مساحته؟`}, correct:tri.toFixed(0)+' cm²', wrongs:[(a*b).toFixed(0)+' cm²',((1/3)*a*b).toFixed(0)+' cm²',(a+b).toFixed(0)+' cm'] },
+        { q:{en:`A triangular prism has 5 faces. True or False?`,ar:'للمنشور المثلثي 5 أوجه. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`What splits light into rainbow colors?`,ar:'ما الذي يُقسّم الضوء إلى ألوان قوس قزح؟'}, correct:'GLASS_PRISM', wrongs:['CUBE_ANS','SPHERE_ANS','CYLINDER_ANS'] },
+      ];
+    },
+    shapeH: (v) => +v.l * CM,
+    label:  (v) => `b=${v.a}  h=${v.b}  l=${v.l}cm`,
+    result: (v) => { const a=+v.a,b=+v.b,l=+v.l; return `V=${(0.5*a*b*l).toFixed(1)}cm³`; },
+  },
+};
+
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+let selectedShape = null;
+let inputValues   = {};
+let currentRotX   = 0;
+let currentRotY   = 0;
+
+// quiz state
+let quizList     = [];
+let quizIndex    = 0;
+let quizScore    = 0;
+let quizTimeLeft = 300; // 5 minutes
+let quizTimerId  = null;
+let quizDone     = false;
+let quizStarted  = false;
+let questionLocked = false;
+
+// panel resize
+let panelH = 44;
+let isResizing = false;
+let resizeStartY = 0;
+let resizeStartH = 44;
+
+// ─────────────────────────────────────────────
+// PANEL RESIZE
+// ─────────────────────────────────────────────
+function setPanel(vh) {
+  panelH = Math.max(18, Math.min(80, vh));
+  document.getElementById('infoPanel').style.height = panelH + 'vh';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  setPanel(panelH);
+  const dragger = document.getElementById('panelDragger');
+  if (dragger) {
+    dragger.addEventListener('touchstart', e => { isResizing=true; resizeStartY=e.touches[0].clientY; resizeStartH=panelH; }, {passive:true});
+  }
+  document.addEventListener('touchmove', e => {
+    if (!isResizing) return;
+    const dy = resizeStartY - e.touches[0].clientY;
+    setPanel(resizeStartH + (dy/window.innerHeight)*100);
+  }, {passive:true});
+  document.addEventListener('touchend', () => { isResizing=false; });
+
+  // marker events
+  const marker = document.getElementById('hiroMarker');
+  const pill   = document.getElementById('markerPill');
+  marker.addEventListener('markerFound', () => {
+    pill.textContent = t('markerFound');
+    pill.classList.add('found');
+  });
+  marker.addEventListener('markerLost', () => {
+    pill.innerHTML = '🔍 ' + t('scanHint');
+    pill.classList.remove('found');
+  });
+});
+
+// ─────────────────────────────────────────────
+// SHAPE PICKER
+// ─────────────────────────────────────────────
+function selectShape(key) {
+  selectedShape = key;
+  const shape = SHAPES[key];
+
+  document.getElementById('dimIcon').textContent  = shape.icon;
+  document.getElementById('dimTitle').textContent = shape.name[currentLang];
+
+  const inputsDiv = document.getElementById('dimInputs');
+  inputsDiv.innerHTML = '';
+  shape.inputs.forEach(inp => {
+    inputsDiv.innerHTML += `
+      <div class="input-group">
+        <label>${inp.label[currentLang]}</label>
+        <input type="number" id="inp-${inp.key}" placeholder="${inp.placeholder}" min="0.1" step="0.1" inputmode="decimal"/>
+      </div>`;
+  });
+
+  const defaults = {};
+  shape.inputs.forEach(i => { defaults[i.key] = i.placeholder; });
+  document.getElementById('formulaPreview').innerHTML =
+    '<strong style="color:var(--orange);font-size:11px;letter-spacing:1px">' +
+    (currentLang === 'ar' ? 'المعادلات' : 'FORMULAS') +
+    '</strong><br/><br/>' +
+    shape.formulas(defaults).map(f => `${f.title[currentLang]}: ${f.formula}`).join('<br/>');
+
+  document.getElementById('shapePicker').style.display = 'none';
+  document.getElementById('dimPanel').style.display    = 'flex';
+}
+
+function goBack() {
+  document.getElementById('dimPanel').style.display    = 'none';
+  document.getElementById('shapePicker').style.display = 'flex';
+}
+
+// ─────────────────────────────────────────────
+// LAUNCH SHAPE
+// ─────────────────────────────────────────────
+function launchShape() {
+  const shape = SHAPES[selectedShape];
+  inputValues = {};
+  let valid = true;
+  shape.inputs.forEach(inp => {
+    const val = parseFloat(document.getElementById('inp-'+inp.key).value);
+    if (!val || val <= 0) valid = false;
+    inputValues[inp.key] = val || +inp.placeholder;
+  });
+  if (!valid) { alert(currentLang==='ar'?'يرجى إدخال أبعاد صحيحة!':'Please enter valid dimensions!'); return; }
+
+  // inject shape
+  document.getElementById('shapeEntity').innerHTML = shape.aframe(inputValues);
+
+  // text must sit ABOVE the shape top — shape top = shapeH (since base is at 0)
+  // we add a gap of 0.12 above the top, then stack 3 lines with 0.12 spacing
+  // cap at 1.5 max so text doesn't disappear off camera for huge shapes
+  const shapeTop = Math.min(shape.shapeH(inputValues), 1.2);
+  const textBase  = shapeTop + 0.12;
+
+  document.getElementById('shapeLabel').setAttribute('position',  `0 ${(textBase + 0.26).toFixed(2)} 0`);
+  document.getElementById('dimLabel').setAttribute('position',    `0 ${(textBase + 0.13).toFixed(2)} 0`);
+  document.getElementById('resultLabel').setAttribute('position', `0 ${textBase.toFixed(2)} 0`);
+
+  // show text in current language
+  document.getElementById('shapeLabel').setAttribute('value',  shape.name[currentLang]);
+  document.getElementById('dimLabel').setAttribute('value',    shape.label(inputValues));
+  document.getElementById('resultLabel').setAttribute('value', shape.result(inputValues));
+
+  rotYaw = 0; rotPitch = 0;
+  const wrapper = document.getElementById('shapeWrapper');
+  if (wrapper) wrapper.setAttribute('rotation', '0 0 0');
+
+  document.getElementById('dimPanel').style.display  = 'none';
+  document.getElementById('infoPanel').style.display = 'block';
+
+  buildInfoPanel();
+  resetQuiz();
+  showTab('stats');
+  soundLaunch();
+  AC.resume();
+}
+
+// ─────────────────────────────────────────────
+// INFO PANEL
+// ─────────────────────────────────────────────
+function buildInfoPanel() {
+  const shape = SHAPES[selectedShape];
+  const v = inputValues;
+
+  // stats
+  document.getElementById('statGrid').innerHTML = shape.stats(v).map(s => `
+    <div class="stat-card">
+      <div class="stat-label">${s.label[currentLang]}</div>
+      <div class="stat-value">${s.value} <span class="stat-unit">${s.unit}</span></div>
+    </div>`).join('');
+
+  // formulas
+  document.getElementById('formulaSteps').innerHTML = shape.formulas(v).map(f => `
+    <div class="formula-step">
+      <div class="step-title">${f.title[currentLang]}</div>
+      <div class="step-formula">${f.formula}</div>
+      <div class="step-result">✓ ${f.result}</div>
+    </div>`).join('');
+
+  // facts
+  document.getElementById('factCards').innerHTML = shape.facts[currentLang].map(f => `
+    <div class="fact-card">${f}</div>`).join('');
+
+  // update change shape button
+  const cb = document.querySelector('.change-btn');
+  if (cb) cb.textContent = t('changeShape');
+}
+
+function changeShape() {
+  stopQuizTimer();
+  document.getElementById('shapeEntity').innerHTML = '';
+  ['shapeLabel','dimLabel','resultLabel'].forEach(id => document.getElementById(id).setAttribute('value',''));
+  document.getElementById('infoPanel').style.display  = 'none';
+  document.getElementById('shapePicker').style.display = 'flex';
+}
+
+function showTab(name, btn) {
+  document.querySelectorAll('.info-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.info-tab').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  const b = btn || document.querySelector(`.info-tab[data-tab="${name}"]`);
+  if (b) b.classList.add('active');
+  if (name === 'quiz' && !quizStarted) startQuiz();
+}
+
+// ─────────────────────────────────────────────
+// QUIZ ENGINE — MCQ style
+// ─────────────────────────────────────────────
+function buildChoices(correct, wrongs) {
+  const TOKENS = {
+    TRUE:        { en:'True',                    ar:'صح'                       },
+    FALSE:       { en:'False',                   ar:'خطأ'                      },
+    DIST_CENTER: { en:'Distance from center to tube', ar:'المسافة من المركز للأنبوب' },
+    THICK_TUBE:  { en:'Thickness of tube',       ar:'سُمك الأنبوب'             },
+    RING_LEN:    { en:'Length of ring',          ar:'طول الحلقة'               },
+    HALF_RING:   { en:'Half the ring radius',    ar:'نصف قطر الحلقة'           },
+    GLASS_PRISM: { en:'Glass prism',             ar:'المنشور الزجاجي'          },
+    CUBE_ANS:    { en:'Cube',                    ar:'المكعب'                   },
+    SPHERE_ANS:  { en:'Sphere',                  ar:'الكرة'                    },
+    CYLINDER_ANS:{ en:'Cylinder',               ar:'الأسطوانة'                },
+  };
+  function display(v) { return TOKENS[v] ? TOKENS[v][currentLang] : v; }
+
+  // build pool: correct + up to 3 wrongs, then shuffle
+  const pool = [correct, ...wrongs].sort(() => Math.random() - 0.5);
+  return pool.map(v => ({ raw: v, label: display(v) }));
+}
+
+function resetQuiz() {
+  stopQuizTimer();
+  quizList = []; quizIndex = 0; quizScore = 0;
+  quizTimeLeft = 300; quizDone = false; quizStarted = false; questionLocked = false;
+  document.getElementById('quizProgress').textContent = 'Q 0/5';
+  document.getElementById('quizScore').textContent    = '⭐ 0';
+  document.getElementById('quizTimer').textContent    = '⏱ 05:00';
+  document.getElementById('quizTimer').classList.remove('timer-warn');
+  document.getElementById('quizPrompt').textContent   = t('startQuizHint');
+  document.getElementById('quizChoices').innerHTML    = '';
+  document.getElementById('quizFeedback').textContent = '';
+  document.getElementById('quizFeedback').className   = 'quiz-feedback';
+  document.getElementById('quizSummary').style.display = 'none';
+}
+
+function startQuiz() {
+  if (quizStarted || !selectedShape) return;
+  quizStarted = true;
+
+  // get the full question bank for this shape
+  const bank = SHAPES[selectedShape].quiz(inputValues);
+
+  // shuffle and pick 5 random unique questions
+  const shuffled = bank.sort(() => Math.random() - 0.5);
+  quizList = shuffled.slice(0, 5);
+
+  renderQuestion();
+  startQuizTimer();
+}
+
+function startQuizTimer() {
+  quizTimerId = setInterval(() => {
+    quizTimeLeft--;
+    const m = String(Math.floor(quizTimeLeft/60)).padStart(2,'0');
+    const s = String(quizTimeLeft%60).padStart(2,'0');
+    document.getElementById('quizTimer').textContent = `⏱ ${m}:${s}`;
+    if (quizTimeLeft <= 30) document.getElementById('quizTimer').classList.add('timer-warn');
+    if (quizTimeLeft <= 0) {
+      stopQuizTimer();
+      document.getElementById('quizPrompt').textContent = t('quizTimeUp');
+      document.getElementById('quizChoices').innerHTML = '';
+      finishQuiz(t('quizTimeUp'));
+    }
+  }, 1000);
+}
+
+function stopQuizTimer() {
+  if (quizTimerId) { clearInterval(quizTimerId); quizTimerId = null; }
+}
+
+function renderQuestion() {
+  if (quizIndex >= 5) { finishQuiz(currentLang==='ar'?'أحسنت! أنهيت جميع الأسئلة':'Great! All questions done'); return; }
+  questionLocked = false;
+  const q = quizList[quizIndex];
+  document.getElementById('quizProgress').textContent = `Q ${quizIndex+1}/5`;
+  document.getElementById('quizPrompt').textContent   = q.q[currentLang];
+  document.getElementById('quizFeedback').textContent = '';
+  document.getElementById('quizFeedback').className   = 'quiz-feedback';
+
+  const choices = buildChoices(q.correct, q.wrongs);
+  document.getElementById('quizChoices').innerHTML = choices.map(c => `
+    <button class="quiz-choice" onclick="selectAnswer(this,'${c.raw.replace(/'/g,"\\'")}')">
+      ${c.label}
+    </button>`).join('');
+}
+
+function selectAnswer(btn, answer) {
+  if (questionLocked || quizDone) return;
+  questionLocked = true;
+
+  const q = quizList[quizIndex];
+  const isCorrect = answer === q.correct;
+
+  // translate a raw answer token to display text
+  const TOKENS = { TRUE:{en:'True',ar:'صح'}, FALSE:{en:'False',ar:'خطأ'}, DIST_CENTER:{en:'Distance from center to tube',ar:'مسافة من المركز للأنبوب'}, THICK_TUBE:{en:'Thickness of tube',ar:'سُمك الأنبوب'}, RING_LEN:{en:'Length of ring',ar:'طول الحلقة'}, HALF_RING:{en:'Half the ring radius',ar:'نصف قطر الحلقة'}, GLASS_PRISM:{en:'Glass prism',ar:'المنشور الزجاجي'}, CUBE_ANS:{en:'Cube',ar:'المكعب'}, SPHERE_ANS:{en:'Sphere',ar:'الكرة'}, CYLINDER_ANS:{en:'Cylinder',ar:'الأسطوانة'} };
+  function displayVal(v) { return TOKENS[v] ? TOKENS[v][currentLang] : v; }
+
+  // highlight correct button green, wrong button red
+  document.querySelectorAll('.quiz-choice').forEach(b => {
+    const raw = b.getAttribute('onclick').match(/'([^']+)'/)?.[1] || '';
+    if (raw === q.correct) b.classList.add('correct');
+    else if (b === btn && !isCorrect) b.classList.add('wrong');
+  });
+
+  if (isCorrect) {
+    quizScore++;
+    document.getElementById('quizScore').textContent = `⭐ ${quizScore}`;
+    document.getElementById('quizFeedback').textContent = t('quizCorrect');
+    document.getElementById('quizFeedback').className   = 'quiz-feedback ok';
+    soundCorrect();
+    showFeedbackOverlay(true);
+  } else {
+    document.getElementById('quizFeedback').textContent = t('quizWrong', displayVal(q.correct));
+    document.getElementById('quizFeedback').className   = 'quiz-feedback bad';
+    soundWrong();
+    showFeedbackOverlay(false);
+  }
+
+  quizIndex++;
+  setTimeout(() => {
+    if (!quizDone) {
+      if (quizIndex >= 5) finishQuiz(currentLang==='ar'?'أحسنت! أنهيت الاختبار':'Quiz complete!');
+      else renderQuestion();
+    }
+  }, 1800);
+}
+
+let lastQuizScore = 0;
+let lastQuizTime  = '';
+let lastQuizReason = '';
+
+function finishQuiz(reason) {
+  if (quizDone) return;
+  quizDone = true;
+  stopQuizTimer();
+  const usedSec = 300 - quizTimeLeft;
+  const m = String(Math.floor(usedSec/60)).padStart(2,'0');
+  const s = String(usedSec%60).padStart(2,'0');
+  lastQuizScore  = quizScore;
+  lastQuizTime   = `${m}:${s}`;
+  lastQuizReason = reason === t('quizTimeUp') ? 'TIME_UP' : 'DONE';
+  renderQuizSummary();
+  document.getElementById('quizChoices').innerHTML = '';
+  document.getElementById('quizFeedback').textContent = '';
+  document.getElementById('quizPrompt').textContent = '';
+  document.getElementById('quizRetryBtn').style.display = 'block';
+  document.getElementById('quizRetryBtn').textContent = t('retryQuiz');
+}
+
+function renderQuizSummary() {
+  if (!quizDone) return;
+  const summary = document.getElementById('quizSummary');
+  const emoji = lastQuizReason === 'TIME_UP' ? '⏰' : '🎓';
+  const line1  = lastQuizReason === 'TIME_UP'
+    ? t('quizTimeUp')
+    : t('quizDone', lastQuizScore, lastQuizTime);
+  summary.innerHTML = `${emoji} ${line1}`;
+  summary.style.display = 'block';
+  document.getElementById('quizRetryBtn').textContent = t('retryQuiz');
+}
+
+function retryQuiz() {
+  document.getElementById('quizRetryBtn').style.display = 'none';
+  resetQuiz();
+  startQuiz();
+}
+
+// ─────────────────────────────────────────────
+// TOUCH SPIN — rotate shape wrapper by dragging
+// Rotates shapeWrapper (not the shape itself) so text labels never rotate
+// Uses proper trackball math to prevent any distortion
+// ─────────────────────────────────────────────
+let touchStartX = 0, touchStartY = 0, isDragging = false;
+let rotYaw = 0;    // horizontal rotation (Y axis)
+let rotPitch = 0;  // vertical rotation (X axis)
+
+document.addEventListener('touchstart', e => {
+  if (e.target.closest('#infoPanel') || e.target.closest('.topbar') ||
+      e.target.closest('#shapePicker') || e.target.closest('#dimPanel')) return;
+  isDragging = true;
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+}, {passive:true});
+
+document.addEventListener('touchmove', e => {
+  if (!isDragging || isResizing) return;
+  const dx = e.touches[0].clientX - touchStartX;
+  const dy = e.touches[0].clientY - touchStartY;
+
+  rotYaw   += dx * 0.4;
+  rotPitch += dy * 0.4;
+  // clamp pitch to prevent flipping
+  rotPitch = Math.max(-85, Math.min(85, rotPitch));
+
+  // rotate the WRAPPER not the shape — so dimensions stay accurate
+  // and text labels outside wrapper are never affected
+  const wrapper = document.getElementById('shapeWrapper');
+  if (wrapper) wrapper.setAttribute('rotation', `${rotPitch} ${rotYaw} 0`);
+
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+}, {passive:true});
+
+document.addEventListener('touchend', () => { isDragging = false; });
+
+// ─────────────────────────────────────────────
+// CAMERA FIX
+// ─────────────────────────────────────────────
+window.addEventListener('load', () => {
+  const checkV = setInterval(() => {
+    const v = document.querySelector('video');
+    if (v) {
+      v.style.cssText = 'position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;object-fit:cover!important;z-index:0!important;';
+      clearInterval(checkV);
+    }
+  }, 100);
+
+  const checkC = setInterval(() => {
+    const canvases = document.querySelectorAll('canvas');
+    if (canvases.length > 0) {
+      canvases.forEach(c => { c.style.zIndex = '1'; c.style.position = 'fixed'; c.style.top = '0'; c.style.left = '0'; });
+      clearInterval(checkC);
+    }
+  }, 100);
+});
+</script>
+</body>
+</html>
