@@ -205,17 +205,25 @@
       transform: perspective(90px) rotateX(14deg) rotateY(-24deg);
     }
     .icon-pyramid {
-      width: 0; height: 0;
-      border-left: 28px solid transparent;
-      border-right: 28px solid transparent;
-      border-bottom: 54px solid #FBBF24;
+      width: 58px; height: 52px;
       filter: drop-shadow(0 5px 5px rgba(0,0,0,0.28));
     }
+    .icon-pyramid::before,
     .icon-pyramid::after {
-      content: ''; position: absolute; left: -1px; top: 11px;
-      width: 0; height: 0;
-      border-left: 27px solid transparent;
-      border-bottom: 43px solid rgba(217,119,6,0.55);
+      content: ''; position: absolute; top: 0; bottom: 0;
+      clip-path: polygon(50% 0, 100% 100%, 0 100%);
+    }
+    .icon-pyramid::before {
+      left: 0; width: 34px;
+      background: linear-gradient(145deg, #FDE68A 0%, #FBBF24 55%, #D97706 100%);
+      transform-origin: right bottom;
+      transform: skewY(-6deg);
+    }
+    .icon-pyramid::after {
+      right: 0; width: 34px;
+      background: linear-gradient(215deg, #FBBF24 0%, #B45309 100%);
+      transform-origin: left bottom;
+      transform: skewY(6deg);
     }
     .icon-cylinder {
       width: 38px; height: 54px; border-radius: 50% / 12%;
@@ -241,7 +249,11 @@
     }
     .icon-torus {
       border-radius: 50%;
-      background: radial-gradient(circle at 32% 25%, #DDD6FE 0 9%, #A78BFA 38%, #6D28D9 100%);
+      background:
+        radial-gradient(circle at 34% 28%, #FDE68A 0 7%, transparent 8%),
+        radial-gradient(circle at 68% 30%, #F9A8D4 0 6%, transparent 7%),
+        radial-gradient(circle at 50% 72%, #93C5FD 0 5%, transparent 6%),
+        radial-gradient(circle at 32% 25%, #FBCFE8 0 11%, #F472B6 34%, #BE185D 100%);
       box-shadow: inset -6px -6px 0 rgba(0,0,0,0.14), 0 5px 7px rgba(0,0,0,0.24);
     }
     .icon-torus::after {
@@ -250,9 +262,9 @@
       box-shadow: inset 3px 3px 5px rgba(0,0,0,0.32);
     }
     .icon-prism {
-      width: 54px; height: 44px;
-      background: linear-gradient(135deg, #F0ABFC, #D946EF 55%, #86198F);
-      clip-path: polygon(10% 82%, 48% 10%, 90% 82%);
+      width: 58px; height: 42px;
+      background: linear-gradient(135deg, #A5F3FC 0%, #22D3EE 48%, #0891B2 100%);
+      clip-path: polygon(8% 82%, 38% 12%, 92% 26%, 64% 96%);
       filter: drop-shadow(0 5px 5px rgba(0,0,0,0.25));
     }
     .dim-icon .icon-shape { width: 34px; height: 34px; }
@@ -261,9 +273,10 @@
     .dim-icon .icon-cylinder::before { width: 26px; height: 8px; }
     .dim-icon .icon-cone { width: 0; height: 0; border-left-width: 18px; border-right-width: 18px; border-bottom-width: 36px; }
     .dim-icon .icon-cone::after { left: -18px; top: 32px; width: 36px; height: 8px; }
-    .dim-icon .icon-pyramid { width: 0; height: 0; border-left-width: 18px; border-right-width: 18px; border-bottom-width: 36px; }
-    .dim-icon .icon-pyramid::after { top: 7px; border-left-width: 17px; border-bottom-width: 29px; }
-    .dim-icon .icon-prism { width: 38px; height: 30px; }
+    .dim-icon .icon-pyramid { width: 38px; height: 34px; }
+    .dim-icon .icon-pyramid::before,
+    .dim-icon .icon-pyramid::after { width: 22px; }
+    .dim-icon .icon-prism { width: 38px; height: 28px; }
     .shape-name { font-size: 15px; font-weight: 800; }
     .shape-desc { font-size: 11px; color: var(--muted); margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
 
@@ -767,27 +780,15 @@ function showFeedbackOverlay(isCorrect) {
 }
 
 // Shape data and 3D models
-// Match the old lab's marker scale: a 5 cm cube becomes about 0.4 AR units,
-// exactly like <a-box scale="0.4 0.4 0.4">.
+// Match the old lab's marker scale directly: 5 cm becomes 0.4 AR units,
+// exactly like the original simple <a-box scale="0.4 0.4 0.4"> example.
 const CM = 0.08;
-// Keep very large inputs visible without changing their proportions.
-const MAX_VISUAL_SIZE = 1.0;
-const FIT_START_CM = 10;
-const FIT_SOFTNESS_CM = 7;
 
-function visualMaxFor(maxCm) {
-  const cm = Math.max(+maxCm || 1, 1);
-  if (cm <= FIT_START_CM) return cm * CM;
-  const startSize = FIT_START_CM * CM;
-  const extraFit = 1 - Math.exp(-(cm - FIT_START_CM) / FIT_SOFTNESS_CM);
-  return Math.min(MAX_VISUAL_SIZE, startSize + (MAX_VISUAL_SIZE - startSize) * extraFit);
-}
-
-// This keeps every shape scalable and accurate: all axes use the same unit,
-// so a 5×5×5 cube is rendered as a real cube, not a stretched box.
-function visualUnitFor(maxCm) {
-  const cm = Math.max(+maxCm || 1, 1);
-  return visualMaxFor(cm) / cm;
+// Keep shape proportions honest. The earlier non-linear fitting formula made
+// big values shrink at a different rate, so shapes could look less like the
+// simple A-Frame primitives. Now every dimension uses the same fixed cm→AR unit.
+function visualUnitFor() {
+  return CM;
 }
 
 function shapeIconHTML(key) {
@@ -800,17 +801,17 @@ AFRAME.registerComponent('triangular-prism', {
     base: {type: 'number', default: 0.4},
     triHeight: {type: 'number', default: 0.3},
     length: {type: 'number', default: 0.6},
-    color: {type: 'color', default: '#D946EF'},
+    color: {type: 'color', default: '#22D3EE'},
     opacity: {type: 'number', default: 0.9}
   },
   init: function () { this.build(); },
   update: function () { this.build(); },
   build: function () {
     const d = this.data, b = d.base, th = d.triHeight, l = d.length;
-    const x0 = -b / 2, x1 = b / 2, z0 = -th / 3, z1 = (2 * th) / 3;
+    const x0 = -b / 2, x1 = b / 2, z0 = -l / 2, z1 = l / 2;
     const verts = [
-      x0,0,z0, x1,0,z0, 0,0,z1,
-      x0,l,z0, x1,l,z0, 0,l,z1
+      x0,0,z0, x1,0,z0, 0,th,z0,
+      x0,0,z1, x1,0,z1, 0,th,z1
     ];
     const idx = [0,1,2, 3,5,4, 0,3,4, 0,4,1, 1,4,5, 1,5,2, 2,5,3, 2,3,0];
     const geo = new THREE.BufferGeometry();
@@ -834,10 +835,10 @@ const SHAPES = {
     ],
     // Cube: all sides are the same.
     aframe: (v) => {
-      const unit = visualUnitFor(+v.a);
+      const unit = visualUnitFor();
       const s = +v.a * unit;
       return `<a-entity rotation="0 35 0">
-        <a-box width="${s}" height="${s}" depth="${s}" color="#3B82F6" opacity="0.9" position="0 ${(s/2).toFixed(3)} 0" scale="1 1 1" shadow="receive:false"></a-box>
+        <a-box width="${s}" height="${s}" depth="${s}" color="#3B82F6" position="0 ${(s/2).toFixed(3)} 0" scale="1 1 1" shadow="receive:false"></a-box>
       </a-entity>`;
     },
     stats: (v) => {
@@ -885,7 +886,7 @@ const SHAPES = {
         { q:{en:`A cube has side ${a} cm. What is the area of ONE face?`,ar:`مكعب ضلعه ${a} سم. ما مساحة وجه واحد؟`}, correct:(a*a).toFixed(0)+' cm²', wrongs:[(a*a*2).toFixed(0)+' cm²',(a*6).toFixed(0)+' cm²',(a*a*a).toFixed(0)+' cm³'] },
       ];
     },
-    shapeH: (v) => +v.a * visualUnitFor(+v.a),
+    shapeH: (v) => +v.a * visualUnitFor(),
     label:  (v) => `a = ${v.a} cm`,
     result: (v) => { const a=+v.a; return `V=${Math.pow(a,3).toFixed(1)}cm³`; },
   },
@@ -897,9 +898,9 @@ const SHAPES = {
     ],
     // Sphere: one radius in every direction. No non-uniform scale, so it stays round.
     aframe: (v) => {
-      const unit = visualUnitFor((+v.r || 1) * 2);
+      const unit = visualUnitFor();
       const r = +v.r * unit;
-      return `<a-sphere radius="${r}" color="#FBBF24" opacity="0.9" position="0 ${r.toFixed(3)} 0" scale="1 1 1" segments-width="64" segments-height="48"></a-sphere>`;
+      return `<a-sphere radius="${r}" color="#FBBF24" position="0 ${r.toFixed(3)} 0" scale="1 1 1" segments-width="64" segments-height="48"></a-sphere>`;
     },
     stats: (v) => {
       const r=+v.r, pi=Math.PI;
@@ -946,7 +947,7 @@ const SHAPES = {
         { q:{en:`A great circle cuts a sphere into two equal halves. True or False?`,ar:'الدائرة الكبرى تقسم الكرة إلى نصفين متساويين. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
       ];
     },
-    shapeH: (v) => +v.r * visualUnitFor((+v.r || 1) * 2) * 2,
+    shapeH: (v) => +v.r * visualUnitFor() * 2,
     label:  (v) => `r = ${v.r} cm`,
     result: (v) => { const r=+v.r,pi=Math.PI; return `V=${((4/3)*pi*r*r*r).toFixed(1)}cm³`; },
   },
@@ -959,9 +960,9 @@ const SHAPES = {
     ],
     // Cylinder: radius and height use the entered values.
     aframe: (v) => {
-      const unit = visualUnitFor(Math.max((+v.r || 1) * 2, +v.h || 1));
+      const unit = visualUnitFor();
       const r=+v.r*unit, h=+v.h*unit;
-      return `<a-cylinder radius="${r}" height="${h}" color="#4ADE80" opacity="0.88" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cylinder>`;
+      return `<a-cylinder radius="${r}" height="${h}" color="#4ADE80" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cylinder>`;
     },
     stats: (v) => {
       const r=+v.r, h=+v.h, pi=Math.PI;
@@ -1008,7 +1009,7 @@ const SHAPES = {
         { q:{en:`How many circular bases does a cylinder have?`,ar:'كم قاعدة دائرية للأسطوانة؟'}, correct:'2', wrongs:['0','1','3'] },
       ];
     },
-    shapeH: (v) => +v.h * visualUnitFor(Math.max((+v.r || 1) * 2, +v.h || 1)),
+    shapeH: (v) => +v.h * visualUnitFor(),
     label:  (v) => `r=${v.r}cm  h=${v.h}cm`,
     result: (v) => { const r=+v.r,h=+v.h,pi=Math.PI; return `V=${(pi*r*r*h).toFixed(1)}cm³`; },
   },
@@ -1020,9 +1021,9 @@ const SHAPES = {
       { key:'h', label:{ en:'Height (cm)',       ar:'الارتفاع (سم)'        }, placeholder:'7' },
     ],
     aframe: (v) => {
-      const unit = visualUnitFor(Math.max((+v.r || 1) * 2, +v.h || 1));
+      const unit = visualUnitFor();
       const r=+v.r*unit, h=+v.h*unit;
-      return `<a-cone radius-bottom="${r}" radius-top="0.001" height="${h}" color="#FB923C" opacity="0.88" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cone>`;
+      return `<a-cone radius-bottom="${r}" radius-top="0.001" height="${h}" color="#FB923C" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cone>`;
     },
     stats: (v) => {
       const r=+v.r, h=+v.h, pi=Math.PI, l=Math.sqrt(r*r+h*h);
@@ -1069,7 +1070,7 @@ const SHAPES = {
         { q:{en:`The slant height is measured along the side of the cone. True or False?`,ar:'الارتفاع المائل يُقاس على جانب المخروط. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
       ];
     },
-    shapeH: (v) => +v.h * visualUnitFor(Math.max((+v.r || 1) * 2, +v.h || 1)),
+    shapeH: (v) => +v.h * visualUnitFor(),
     label:  (v) => `r=${v.r}cm  h=${v.h}cm`,
     result: (v) => { const r=+v.r,h=+v.h,pi=Math.PI,l=Math.sqrt(r*r+h*h); return `V=${((1/3)*pi*r*r*h).toFixed(1)}cm³  l=${l.toFixed(1)}cm`; },
   },
@@ -1082,9 +1083,9 @@ const SHAPES = {
     ],
     // A cone with 4 sides makes a square pyramid.
     aframe: (v) => {
-      const unit = visualUnitFor(Math.max(+v.b || 1, +v.h || 1));
+      const unit = visualUnitFor();
       const b=+v.b*unit*0.7, h=+v.h*unit;
-      return `<a-cone radius-bottom="${b}" radius-top="0.001" height="${h}" color="#FBBF24" opacity="0.88" segments-radial="4" position="0 ${(h/2).toFixed(3)} 0" rotation="0 45 0" scale="1 1 1"></a-cone>`;
+      return `<a-cone radius-bottom="${b}" radius-top="0.001" height="${h}" color="#FBBF24" segments-radial="4" position="0 ${(h/2).toFixed(3)} 0" rotation="0 45 0" scale="1 1 1"></a-cone>`;
     },
     stats: (v) => {
       const b=+v.b, h=+v.h, sl=Math.sqrt(h*h+(b/2)*(b/2));
@@ -1131,7 +1132,7 @@ const SHAPES = {
         { q:{en:`The base area of this square pyramid is what?`,ar:'ما مساحة قاعدة هذا الهرم الرباعي؟'}, correct:(b*b).toFixed(0)+' cm²', wrongs:[(4*b).toFixed(0)+' cm',(b*h).toFixed(0)+' cm²',((1/3)*b*b*h).toFixed(0)+' cm³'] },
       ];
     },
-    shapeH: (v) => +v.h * visualUnitFor(Math.max(+v.b || 1, +v.h || 1)),
+    shapeH: (v) => +v.h * visualUnitFor(),
     label:  (v) => `b=${v.b}cm  h=${v.h}cm`,
     result: (v) => { const b=+v.b,h=+v.h; return `V=${((1/3)*b*b*h).toFixed(1)}cm³`; },
   },
@@ -1143,12 +1144,11 @@ const SHAPES = {
       { key:'r', label:{ en:'Minor Radius (cm)', ar:'نصف القطر الصغير (سم)' }, placeholder:'2' },
     ],
     aframe: (v) => {
-      const unit = visualUnitFor(((+v.R || 1) + (+v.r || 1)) * 2);
-      const R=(+v.R*unit) * 1.08;
-      // Make the tube a little thinner visually so the center hole is easier to see.
-      const r=Math.min(+v.r*unit*0.72, R*0.42);
+      const unit = visualUnitFor();
+      const R = +v.R * unit;
+      const r = +v.r * unit;
       const centerY = R + r;
-      return `<a-torus radius="${R}" radius-tubular="${r}" color="#A78BFA" opacity="0.9" position="0 ${centerY.toFixed(3)} 0" scale="1 1 1" segments-radial="64" segments-tubular="18"></a-torus>`;
+      return `<a-torus radius="${R}" radius-tubular="${r}" color="#F472B6" position="0 ${centerY.toFixed(3)} 0" scale="1 1 1" segments-radial="64" segments-tubular="18"></a-torus>`;
     },
     stats: (v) => {
       const R=+v.R, r=+v.r, pi=Math.PI;
@@ -1195,7 +1195,7 @@ const SHAPES = {
         { q:{en:`A torus has a hole through the middle. True or False?`,ar:'للشكل الحلقي فتحة في الوسط. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
       ];
     },
-    shapeH: (v) => ((+v.R || 1) + (+v.r || 1)) * visualUnitFor(((+v.R || 1) + (+v.r || 1)) * 2) * 2,
+    shapeH: (v) => ((+v.R || 1) + (+v.r || 1)) * visualUnitFor() * 2,
     label:  (v) => `R=${v.R}cm  r=${v.r}cm`,
     result: (v) => { const R=+v.R,r=+v.r,pi=Math.PI; return `V=${(2*pi*pi*R*r*r).toFixed(1)}cm³`; },
   },
@@ -1209,10 +1209,10 @@ const SHAPES = {
     ],
     // Cuboid: length, width, and height can all be different.
     aframe: (v) => {
-      const unit = visualUnitFor(Math.max(+v.l || 1, +v.w || 1, +v.h || 1));
+      const unit = visualUnitFor();
       const l=+v.l*unit, w=+v.w*unit, h=+v.h*unit;
       return `<a-entity rotation="0 -28 0">
-        <a-box width="${l}" height="${h}" depth="${w}" color="#F472B6" opacity="0.9" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1" shadow="receive:false"></a-box>
+        <a-box width="${l}" height="${h}" depth="${w}" color="#F472B6" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1" shadow="receive:false"></a-box>
       </a-entity>`;
     },
     stats: (v) => {
@@ -1260,7 +1260,7 @@ const SHAPES = {
         { q:{en:`A cuboid can have three different side lengths. True or False?`,ar:'يمكن أن تكون لمتوازي المستطيلات ثلاثة أبعاد مختلفة. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
       ];
     },
-    shapeH: (v) => +v.h * visualUnitFor(Math.max(+v.l || 1, +v.w || 1, +v.h || 1)),
+    shapeH: (v) => +v.h * visualUnitFor(),
     label:  (v) => currentLang === 'ar' ? `الطول ${v.l} × العرض ${v.w} × الارتفاع ${v.h} سم` : `${v.l} × ${v.w} × ${v.h} cm`,
     result: (v) => { const l=+v.l,w=+v.w,h=+v.h; return `V=${(l*w*h).toFixed(1)}cm³`; },
   },
@@ -1273,9 +1273,9 @@ const SHAPES = {
       { key:'l', label:{ en:'Prism Length (cm)',    ar:'طول المنشور (سم)'    }, placeholder:'9' },
     ],
     aframe: (v) => {
-      const unit = visualUnitFor(Math.max(+v.a || 1, +v.b || 1, +v.l || 1));
+      const unit = visualUnitFor();
       const base = +v.a * unit, triH = +v.b * unit, len = +v.l * unit;
-      return `<a-entity triangular-prism="base: ${base}; triHeight: ${triH}; length: ${len}; color: #D946EF; opacity: 0.9" position="0 0 0" scale="1 1 1"></a-entity>`;
+      return `<a-entity triangular-prism="base: ${base}; triHeight: ${triH}; length: ${len}; color: #22D3EE; opacity: 1" position="0 0 0" scale="1 1 1"></a-entity>`;
     },
     stats: (v) => {
       const a=+v.a, b=+v.b, l=+v.l, tri=0.5*a*b, hyp=Math.sqrt(a*a+b*b);
@@ -1322,7 +1322,7 @@ const SHAPES = {
         { q:{en:`Which shape is used for the two ends of a triangular prism?`,ar:'ما شكل الطرفين في المنشور المثلثي؟'}, correct:'TRIANGLE_ANS', wrongs:['SQUARE_ANS','CIRCLE_ANS','BALL_ANS'] },
       ];
     },
-    shapeH: (v) => +v.l * visualUnitFor(Math.max(+v.a || 1, +v.b || 1, +v.l || 1)),
+    shapeH: (v) => +v.b * visualUnitFor(),
     label:  (v) => `b=${v.a}  h=${v.b}  l=${v.l}cm`,
     result: (v) => { const a=+v.a,b=+v.b,l=+v.l; return `V=${(0.5*a*b*l).toFixed(1)}cm³`; },
   },
