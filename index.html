@@ -179,7 +179,50 @@
       background: rgba(34,211,238,0.1);
     }
 
-    .shape-icon { font-size: 44px; margin-bottom: 10px; }
+    /* Shape icons are simple CSS drawings instead of random emojis.
+       This makes each card look closer to the real 3D shape. */
+    .shape-icon {
+      width: 58px; height: 58px; margin: 0 auto 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 44px;
+    }
+    .icon-shape { position: relative; width: 52px; height: 52px; }
+    .icon-sphere {
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 25%, #FFF7A8 0 12%, #FBBF24 35%, #D97706 100%);
+      box-shadow: inset -5px -6px 0 rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.25);
+    }
+    .icon-cube {
+      border-radius: 9px;
+      background: linear-gradient(135deg, #60A5FA 0 18%, #3B82F6 18% 55%, #1D4ED8 100%);
+      box-shadow: inset -5px -5px 0 rgba(0,0,0,0.15), 0 4px 8px rgba(0,0,0,0.22);
+      transform: rotate(0deg);
+    }
+    .icon-cuboid {
+      width: 62px; height: 38px; border-radius: 8px;
+      background: linear-gradient(135deg, #FB7185 0 18%, #F43F5E 18% 62%, #BE123C 100%);
+      box-shadow: inset -7px -5px 0 rgba(0,0,0,0.16), 0 4px 8px rgba(0,0,0,0.24);
+      transform: perspective(90px) rotateX(14deg) rotateY(-24deg);
+    }
+    .icon-pyramid {
+      width: 0; height: 0;
+      border-left: 28px solid transparent;
+      border-right: 28px solid transparent;
+      border-bottom: 54px solid #FBBF24;
+      filter: drop-shadow(0 5px 5px rgba(0,0,0,0.28));
+    }
+    .icon-pyramid::after {
+      content: ''; position: absolute; left: -1px; top: 11px;
+      width: 0; height: 0;
+      border-left: 27px solid transparent;
+      border-bottom: 43px solid rgba(217,119,6,0.55);
+    }
+    .icon-prism {
+      width: 54px; height: 44px;
+      background: linear-gradient(135deg, #F0ABFC, #D946EF 55%, #86198F);
+      clip-path: polygon(10% 82%, 48% 10%, 90% 82%);
+      filter: drop-shadow(0 5px 5px rgba(0,0,0,0.25));
+    }
     .shape-name { font-size: 15px; font-weight: 800; }
     .shape-desc { font-size: 11px; color: var(--muted); margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
 
@@ -464,12 +507,12 @@
   </div>
   <div class="shape-grid">
     <div class="shape-card" onclick="selectShape('cube')">
-      <div class="shape-icon">🟦</div>
+      <div class="shape-icon"><div class="icon-shape icon-cube" aria-hidden="true"></div></div>
       <div class="shape-name" data-key="shapeCube">Cube</div>
       <div class="shape-desc" data-key="descCube">6 equal faces</div>
     </div>
     <div class="shape-card" onclick="selectShape('sphere')">
-      <div class="shape-icon">🟠</div>
+      <div class="shape-icon"><div class="icon-shape icon-sphere" aria-hidden="true"></div></div>
       <div class="shape-name" data-key="shapeSphere">Sphere</div>
       <div class="shape-desc" data-key="descSphere">perfectly round</div>
     </div>
@@ -484,7 +527,7 @@
       <div class="shape-desc" data-key="descCone">pointed apex</div>
     </div>
     <div class="shape-card" onclick="selectShape('pyramid')">
-      <div class="shape-icon">🔺</div>
+      <div class="shape-icon"><div class="icon-shape icon-pyramid" aria-hidden="true"></div></div>
       <div class="shape-name" data-key="shapePyramid">Pyramid</div>
       <div class="shape-desc" data-key="descPyramid">4 triangular faces</div>
     </div>
@@ -494,12 +537,12 @@
       <div class="shape-desc" data-key="descTorus">3D ring shape</div>
     </div>
     <div class="shape-card" onclick="selectShape('rectangle')">
-      <div class="shape-icon">🟥</div>
+      <div class="shape-icon"><div class="icon-shape icon-cuboid" aria-hidden="true"></div></div>
       <div class="shape-name" data-key="shapeCuboid">Cuboid</div>
       <div class="shape-desc" data-key="descCuboid">3 different sides</div>
     </div>
     <div class="shape-card" onclick="selectShape('prism')">
-      <div class="shape-icon">🔷</div>
+      <div class="shape-icon"><div class="icon-shape icon-prism" aria-hidden="true"></div></div>
       <div class="shape-name" data-key="shapePrism">Tri. Prism</div>
       <div class="shape-desc" data-key="descPrism">triangle base</div>
     </div>
@@ -683,9 +726,14 @@ function showFeedbackOverlay(isCorrect) {
 }
 
 // Shape data and 3D models
-const CM = 0.07; // Normal visual size for small inputs
-const MAX_VISUAL_SIZE = 0.52; // Keeps big inputs from covering the marker
+// One centimeter in the math is too big for the phone camera,
+// so CM means: "how large 1 cm should look in AR".
+const CM = 0.07;
+// If the student types a huge number, the shape still shrinks to fit the marker.
+const MAX_VISUAL_SIZE = 0.52;
 
+// This keeps every shape scalable. Small inputs use the normal CM size,
+// and large inputs use a smaller unit so they do not cover the screen.
 function visualUnitFor(maxCm) {
   return Math.min(CM, MAX_VISUAL_SIZE / Math.max(+maxCm || 1, 1));
 }
@@ -701,9 +749,8 @@ const SHAPES = {
     aframe: (v) => {
       const unit = visualUnitFor(+v.a);
       const s = +v.a * unit;
-      return `<a-entity>
-        <a-box width="${s}" height="${s}" depth="${s}" color="#3B82F6" opacity="0.86" position="0 ${(s/2).toFixed(3)} 0" scale="1 1 1"></a-box>
-        <a-box width="${s}" height="${s}" depth="${s}" position="0 ${(s/2).toFixed(3)} 0" material="color:#06111F; wireframe:true; transparent:true; opacity:0.95"></a-box>
+      return `<a-entity rotation="0 35 0">
+        <a-box width="${s}" height="${s}" depth="${s}" color="#3B82F6" opacity="0.9" position="0 ${(s/2).toFixed(3)} 0" scale="1 1 1" shadow="receive:false"></a-box>
       </a-entity>`;
     },
     stats: (v) => {
@@ -757,15 +804,17 @@ const SHAPES = {
   },
 
   sphere: {
-    name: { en: 'Sphere', ar: 'كرة' }, icon: '🔵',
+    name: { en: 'Sphere', ar: 'كرة' }, icon: '🟡',
     inputs: [
       { key:'r', label:{ en:'Radius (cm)', ar:'نصف القطر (سم)' }, placeholder:'4' }
     ],
     // Sphere: one radius in every direction.
+    // The marker camera stretches round objects a little on many phones,
+    // so the Y scale is slightly smaller to make it look round on screen.
     aframe: (v) => {
       const unit = visualUnitFor((+v.r || 1) * 2);
       const r = +v.r * unit;
-      return `<a-sphere radius="${r}" color="#FB923C" opacity="0.88" position="0 ${r.toFixed(3)} 0" scale="1 1 1" segments-width="48" segments-height="32"></a-sphere>`;
+      return `<a-sphere radius="${r}" color="#FBBF24" opacity="0.9" position="0 ${(r*0.88).toFixed(3)} 0" scale="1 0.88 1" segments-width="64" segments-height="48"></a-sphere>`;
     },
     stats: (v) => {
       const r=+v.r, pi=Math.PI;
@@ -812,7 +861,7 @@ const SHAPES = {
         { q:{en:`A great circle cuts a sphere into two equal halves. True or False?`,ar:'الدائرة الكبرى تقسم الكرة إلى نصفين متساويين. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
       ];
     },
-    shapeH: (v) => +v.r * visualUnitFor((+v.r || 1) * 2) * 2,
+    shapeH: (v) => +v.r * visualUnitFor((+v.r || 1) * 2) * 2 * 0.88,
     label:  (v) => `r = ${v.r} cm`,
     result: (v) => { const r=+v.r,pi=Math.PI; return `V=${((4/3)*pi*r*r*r).toFixed(1)}cm³`; },
   },
@@ -941,7 +990,7 @@ const SHAPES = {
   },
 
   pyramid: {
-    name: { en: 'Pyramid', ar: 'هرم' }, icon: '🔺',
+    name: { en: 'Pyramid', ar: 'هرم' }, icon: '🔻',
     inputs: [
       { key:'b', label:{ en:'Base Side (cm)', ar:'ضلع القاعدة (سم)' }, placeholder:'6' },
       { key:'h', label:{ en:'Height (cm)',    ar:'الارتفاع (سم)'    }, placeholder:'8' },
@@ -1010,9 +1059,11 @@ const SHAPES = {
     ],
     aframe: (v) => {
       const unit = visualUnitFor(((+v.R || 1) + (+v.r || 1)) * 2);
-      const R=+v.R*unit, r=+v.r*unit;
+      const R=(+v.R*unit) * 1.08;
+      // Make the tube a little thinner visually so the center hole is easier to see.
+      const r=Math.min(+v.r*unit*0.72, R*0.42);
       const centerY = R + r;
-      return `<a-torus radius="${R}" radius-tubular="${r}" color="#A78BFA" opacity="0.88" position="0 ${centerY.toFixed(3)} 0" scale="1 1 1"></a-torus>`;
+      return `<a-torus radius="${R}" radius-tubular="${r}" color="#A78BFA" opacity="0.9" position="0 ${centerY.toFixed(3)} 0" scale="1 1 1" segments-radial="64" segments-tubular="18"></a-torus>`;
     },
     stats: (v) => {
       const R=+v.R, r=+v.r, pi=Math.PI;
@@ -1065,7 +1116,7 @@ const SHAPES = {
   },
 
   rectangle: {
-    name: { en: 'Cuboid', ar: 'متوازي مستطيلات' }, icon: '🟥',
+    name: { en: 'Cuboid', ar: 'متوازي مستطيلات' }, icon: '🧱',
     inputs: [
       { key:'l', label:{ en:'Length (cm)', ar:'الطول (سم)'  }, placeholder:'8' },
       { key:'w', label:{ en:'Width (cm)',  ar:'العرض (سم)'  }, placeholder:'5' },
@@ -1075,9 +1126,8 @@ const SHAPES = {
     aframe: (v) => {
       const unit = visualUnitFor(Math.max(+v.l || 1, +v.w || 1, +v.h || 1));
       const l=+v.l*unit, w=+v.w*unit, h=+v.h*unit;
-      return `<a-entity>
-        <a-box width="${l}" height="${h}" depth="${w}" color="#F472B6" opacity="0.86" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-box>
-        <a-box width="${l}" height="${h}" depth="${w}" position="0 ${(h/2).toFixed(3)} 0" material="color:#2A0B1C; wireframe:true; transparent:true; opacity:0.9"></a-box>
+      return `<a-entity rotation="0 -28 0">
+        <a-box width="${l}" height="${h}" depth="${w}" color="#F472B6" opacity="0.9" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1" shadow="receive:false"></a-box>
       </a-entity>`;
     },
     stats: (v) => {
@@ -1126,12 +1176,12 @@ const SHAPES = {
       ];
     },
     shapeH: (v) => +v.h * visualUnitFor(Math.max(+v.l || 1, +v.w || 1, +v.h || 1)),
-    label:  (v) => `${v.l} x ${v.w} x ${v.h} cm`,
+    label:  (v) => currentLang === 'ar' ? `الطول ${v.l} × العرض ${v.w} × الارتفاع ${v.h} سم` : `${v.l} × ${v.w} × ${v.h} cm`,
     result: (v) => { const l=+v.l,w=+v.w,h=+v.h; return `V=${(l*w*h).toFixed(1)}cm³`; },
   },
 
   prism: {
-    name: { en: 'Tri. Prism', ar: 'منشور مثلثي' }, icon: '🔷',
+    name: { en: 'Tri. Prism', ar: 'منشور مثلثي' }, icon: '🔶',
     inputs: [
       { key:'a', label:{ en:'Triangle Base (cm)',   ar:'قاعدة المثلث (سم)'  }, placeholder:'6' },
       { key:'b', label:{ en:'Triangle Height (cm)', ar:'ارتفاع المثلث (سم)' }, placeholder:'5' },
@@ -1140,7 +1190,7 @@ const SHAPES = {
     aframe: (v) => {
       const unit = visualUnitFor(Math.max(+v.a || 1, +v.b || 1, +v.l || 1));
       const r=+v.a*unit*0.6, h=+v.l*unit;
-      return `<a-cylinder radius="${r}" height="${h}" color="#22D3EE" opacity="0.88" segments-radial="3" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cylinder>`;
+      return `<a-cylinder radius="${r}" height="${h}" color="#D946EF" opacity="0.9" segments-radial="3" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cylinder>`;
     },
     stats: (v) => {
       const a=+v.a, b=+v.b, l=+v.l, tri=0.5*a*b, hyp=Math.sqrt(a*a+b*b);
@@ -1201,6 +1251,8 @@ let currentRotY   = 0;
 const lastQuizSignatures = {};
 
 // Floating labels above the AR model
+// A-Frame cannot draw normal HTML text inside the AR world,
+// so this function writes text on a hidden canvas and uses it as a texture.
 function makeLabelTexture(text, color, fontSize = 78) {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
@@ -1337,6 +1389,8 @@ function goBack() {
 }
 
 // Launch the selected shape
+// This reads the numbers from the input boxes, builds the 3D model,
+// places the labels above it, and opens the bottom information panel.
 function launchShape() {
   const shape = SHAPES[selectedShape];
   inputValues = {};
@@ -1353,6 +1407,7 @@ function launchShape() {
   requestAnimationFrame(keepModelVisible);
 
   // Put the text above the top of the model.
+  // We calculate the visible height first so labels stay above every size.
   const shapeTop = shape.shapeH(inputValues);
   const textBase  = shapeTop + 0.14;
 
