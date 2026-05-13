@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
 
   <script>
-    // this script fixes the camera so it fills the screen correctly on mobile
+    // Ask for the back camera and a normal wide view on phones.
     var originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     navigator.mediaDevices.getUserMedia = function(constraints) {
       if (constraints && constraints.video) {
@@ -51,7 +51,7 @@
       background: #000; color: var(--text);
     }
 
-    /* camera and canvas layers */
+    /* Camera video and AR drawing layers */
     a-scene, .a-canvas, video, canvas {
       position: fixed !important;
       inset: 0 !important;
@@ -62,16 +62,21 @@
       min-width: 100vw !important;
       min-height: 100vh !important;
     }
+    a-scene {
+      z-index: 2 !important;
+      pointer-events: none !important;
+    }
     video {
       object-fit: cover !important; z-index: 0 !important;
       transform: translateZ(0);
       background: #000 !important;
     }
     canvas, .a-canvas {
-      z-index: 1 !important; pointer-events: none !important;
+      z-index: 2 !important; pointer-events: none !important;
+      background: transparent !important;
     }
 
-    /* main UI layer */
+    /* Main app controls */
     #ui {
       position: fixed; top: 0; left: 0;
       width: 100%; height: 100%;
@@ -80,7 +85,7 @@
       justify-content: space-between;
     }
 
-    /* ── TOP BAR ── */
+    /* Top bar */
     .topbar {
       pointer-events: all;
       display: flex; align-items: center;
@@ -127,7 +132,7 @@
       background: rgba(74,222,128,0.1);
     }
 
-    /* ── SHAPE PICKER ── */
+    /* Shape picker */
     #shapePicker {
       position: fixed; inset: 0;
       background: var(--bg); z-index: 50;
@@ -178,7 +183,7 @@
     .shape-name { font-size: 15px; font-weight: 800; }
     .shape-desc { font-size: 11px; color: var(--muted); margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
 
-    /* ── DIM PANEL ── */
+    /* Size input screen */
     #dimPanel {
       position: fixed; inset: 0;
       background: var(--bg); z-index: 49;
@@ -232,7 +237,7 @@
       font-size: 11px; color: var(--muted); line-height: 1.9;
     }
 
-    /* ── INFO PANEL ── */
+    /* Bottom info panel */
     #infoPanel {
       pointer-events: all;
       background: var(--panel);
@@ -294,7 +299,7 @@
       margin-bottom: 8px; font-size: 14px; font-weight: 600; line-height: 1.7;
     }
 
-    /* ── QUIZ ── */
+    /* Quiz */
     .quiz-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
     .quiz-pill {
       font-family: 'JetBrains Mono', monospace; font-size: 11px;
@@ -313,7 +318,7 @@
       margin-bottom: 14px; color: var(--text);
     }
 
-    /* MCQ choices */
+    /* Quiz answers */
     .quiz-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
     .quiz-choices.two-choices { grid-template-columns: 1fr 1fr; }
     .quiz-choices.four-choices { grid-template-columns: 1fr 1fr; }
@@ -346,7 +351,7 @@
       display: none; margin-top: 10px; text-align: center;
     }
 
-    /* ── FEEDBACK OVERLAY (correct/wrong animation on screen) ── */
+    /* Big answer feedback */
     #feedbackOverlay {
       position: fixed; inset: 0; z-index: 200;
       display: flex; align-items: center; justify-content: center;
@@ -387,14 +392,14 @@
   embedded
   arjs="sourceType: webcam; debugUIEnabled: false; zoom: 1;"
   vr-mode-ui="enabled: false"
-  renderer="logarithmicDepthBuffer: true; antialias: true;"
+  renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true; sortObjects: true;"
 >
   <a-marker id="hiroMarker" preset="hiro" smooth="true" smoothCount="10" smoothTolerance="0.01" smoothThreshold="5">
-    <!-- shapeWrapper is what we rotate — text labels are separate so they don't distort -->
+    <!-- This part rotates when the user drags the model. -->
     <a-entity id="shapeWrapper">
       <a-entity id="shapeEntity"></a-entity>
     </a-entity>
-    <!-- Canvas-text labels render above the shape with depth testing disabled, including Arabic text. -->
+    <!-- These flat labels sit above the shape. -->
     <a-plane id="shapeLabel"  width="1.8" height="0.22" position="0 1.5 0" visible="false" transparent="true" material="transparent: true; depthTest: false; depthWrite: false; side: double"></a-plane>
     <a-plane id="dimLabel"    width="1.8" height="0.18" position="0 1.25 0" visible="false" transparent="true" material="transparent: true; depthTest: false; depthWrite: false; side: double"></a-plane>
     <a-plane id="resultLabel" width="1.8" height="0.18" position="0 1.05 0" visible="false" transparent="true" material="transparent: true; depthTest: false; depthWrite: false; side: double"></a-plane>
@@ -402,7 +407,7 @@
   <a-entity camera></a-entity>
 </a-scene>
 
-<!-- feedback overlay (shown on correct/wrong) -->
+<!-- feedback overlay -->
 <div id="feedbackOverlay">
   <div class="feedback-bubble" id="feedbackBubble"></div>
 </div>
@@ -501,7 +506,7 @@
   </div>
 </div>
 
-<!-- dimension input screen -->
+<!-- size input screen -->
 <div id="dimPanel">
   <div class="dim-header">
     <button class="back-btn" onclick="goBack()">← <span data-key="back">Back</span></button>
@@ -515,15 +520,13 @@
 </div>
 
 <script>
-// ─────────────────────────────────────────────
-// LANGUAGE SYSTEM
-// ─────────────────────────────────────────────
+// Language text
 let currentLang = 'en';
 
 const TRANSLATIONS = {
   en: {
     pickerSubtitle:  'AR Geometry Explorer · Point at Hiro marker',
-    scanHint: 'Point at Hiro', markerFound: '✓ Detected!',
+    scanHint: 'Point at Hiro', markerFound: 'Detected!',
     shapeCube: 'Cube', shapeSphere: 'Sphere', shapeCylinder: 'Cylinder',
     shapeCone: 'Cone', shapePyramid: 'Pyramid', shapeTorus: 'Torus',
     shapeCuboid: 'Cuboid', shapePrism: 'Tri. Prism',
@@ -540,7 +543,7 @@ const TRANSLATIONS = {
   },
   ar: {
     pickerSubtitle:  'استكشف الأشكال الهندسية بالواقع المعزز · وجّه الكاميرا للماركر',
-    scanHint: 'وجّه الكاميرا نحو الماركر', markerFound: '✓ تم الكشف!',
+    scanHint: 'وجّه الكاميرا نحو الماركر', markerFound: 'تم الكشف!',
     shapeCube: 'مكعب', shapeSphere: 'كرة', shapeCylinder: 'أسطوانة',
     shapeCone: 'مخروط', shapePyramid: 'هرم', shapeTorus: 'حلقي',
     shapeCuboid: 'متوازي مستطيلات', shapePrism: 'منشور مثلثي',
@@ -562,17 +565,24 @@ function t(key, ...args) {
   return typeof val === 'function' ? val(...args) : (val || key);
 }
 
+function setMarkerPill(found) {
+  const pill = document.getElementById('markerPill');
+  if (!pill) return;
+  pill.classList.toggle('found', found);
+  pill.textContent = (found ? '✓ ' : '🔍 ') + t(found ? 'markerFound' : 'scanHint');
+}
+
 function applyLang() {
   const isAr = currentLang === 'ar';
   document.documentElement.lang = currentLang;
   document.documentElement.dir  = isAr ? 'rtl' : 'ltr';
 
-  // update ALL lang buttons on every page
+  // Update all language buttons.
   document.querySelectorAll('.lang-btn').forEach(b => {
     b.textContent = isAr ? 'English' : 'عربي';
   });
 
-  // update all data-key text elements
+  // Update text that uses translation keys.
   document.querySelectorAll('[data-key]').forEach(el => {
     const k = el.getAttribute('data-key');
     if (TRANSLATIONS[currentLang][k] && typeof TRANSLATIONS[currentLang][k] === 'string') {
@@ -580,21 +590,21 @@ function applyLang() {
     }
   });
 
-  // update marker pill
+  // Keep the marker message in the right language.
   const pill = document.getElementById('markerPill');
-  const found = pill.classList.contains('found');
-  pill.innerHTML = (found ? '✓ ' : '🔍 ') + t(found ? 'markerFound' : 'scanHint');
+  const found = pill && pill.classList.contains('found');
+  setMarkerPill(!!found);
 
-  // if dim panel is open rebuild in new language
+  // Refresh the size screen if it is open.
   if (document.getElementById('dimPanel').style.display !== 'none' && selectedShape) {
     const shape = SHAPES[selectedShape];
     document.getElementById('dimTitle').textContent = shape.name[currentLang];
-    // rebuild input labels
+    // Refresh input labels.
     shape.inputs.forEach(inp => {
       const lbl = document.querySelector(`label[for="inp-${inp.key}"]`);
       if (lbl) lbl.textContent = inp.label[currentLang];
       else {
-        // fallback: rebuild all inputs
+        // Rebuild inputs if a label was not found.
         const inputsDiv = document.getElementById('dimInputs');
         inputsDiv.innerHTML = '';
         shape.inputs.forEach(i => {
@@ -603,7 +613,7 @@ function applyLang() {
         return;
       }
     });
-    // rebuild formula preview
+    // Refresh the formula preview.
     const defaults = {};
     shape.inputs.forEach(i => { defaults[i.key] = i.placeholder; });
     document.getElementById('formulaPreview').innerHTML =
@@ -613,15 +623,15 @@ function applyLang() {
       shape.formulas(defaults).map(f => `${f.title[currentLang]}: ${f.formula}`).join('<br/>');
   }
 
-  // if info panel is open, rebuild it in new language
+  // Refresh the info panel if it is open.
   if (document.getElementById('infoPanel').style.display !== 'none' && selectedShape) {
     buildInfoPanel();
     updateFloatingLabels();
-    // if quiz is active, re-render the current question in new language immediately
+    // Refresh the current quiz question.
     if (quizStarted && !quizDone && quizList.length > 0 && quizIndex < quizList.length) {
       renderQuestion();
     }
-    // if quiz is done, update summary text in new language
+    // Refresh the finished quiz message.
     if (quizDone) renderQuizSummary();
   }
 }
@@ -631,9 +641,7 @@ function toggleLang() {
   applyLang();
 }
 
-// ─────────────────────────────────────────────
-// SOUND ENGINE  (Web Audio API — no files needed)
-// ─────────────────────────────────────────────
+// Small sounds
 const AC = new (window.AudioContext || window.webkitAudioContext)();
 
 function playTone(freq, type, duration, vol) {
@@ -664,9 +672,7 @@ function soundLaunch() {
   setTimeout(() => playTone(660, 'sine', 0.2, 0.2), 160);
 }
 
-// ─────────────────────────────────────────────
-// FEEDBACK OVERLAY
-// ─────────────────────────────────────────────
+// Answer feedback
 function showFeedbackOverlay(isCorrect) {
   const overlay = document.getElementById('feedbackOverlay');
   const bubble  = document.getElementById('feedbackBubble');
@@ -676,14 +682,9 @@ function showFeedbackOverlay(isCorrect) {
   setTimeout(() => overlay.classList.remove('show'), 900);
 }
 
-// ─────────────────────────────────────────────
-// SHAPES — Accurate 3D models
-// Key fix: ALL shapes use scale="1 1 1" and preserve entered proportions.
-// Larger inputs are fitted down uniformly so cubes stay cubical and models remain
-// readable on the Hiro marker without stretching one axis differently.
-// ─────────────────────────────────────────────
-const CM = 0.07; // baseline visual size for normal inputs
-const MAX_VISUAL_SIZE = 0.52; // keep large inputs readable on the Hiro marker
+// Shape data and 3D models
+const CM = 0.07; // Normal visual size for small inputs
+const MAX_VISUAL_SIZE = 0.52; // Keeps big inputs from covering the marker
 
 function visualUnitFor(maxCm) {
   return Math.min(CM, MAX_VISUAL_SIZE / Math.max(+maxCm || 1, 1));
@@ -696,7 +697,7 @@ const SHAPES = {
     inputs: [
       { key:'a', label:{ en:'Side Length (cm)', ar:'طول الضلع (سم)' }, placeholder:'5' }
     ],
-    // cube: width=height=depth=a — perfect cube every time
+    // Cube: all sides are the same.
     aframe: (v) => {
       const unit = visualUnitFor(+v.a);
       const s = +v.a * unit;
@@ -760,7 +761,7 @@ const SHAPES = {
     inputs: [
       { key:'r', label:{ en:'Radius (cm)', ar:'نصف القطر (سم)' }, placeholder:'4' }
     ],
-    // sphere: radius = r — perfectly round in all directions
+    // Sphere: one radius in every direction.
     aframe: (v) => {
       const unit = visualUnitFor((+v.r || 1) * 2);
       const r = +v.r * unit;
@@ -822,7 +823,7 @@ const SHAPES = {
       { key:'r', label:{ en:'Radius (cm)',  ar:'نصف القطر (سم)' }, placeholder:'3' },
       { key:'h', label:{ en:'Height (cm)',  ar:'الارتفاع (سم)'  }, placeholder:'8' },
     ],
-    // cylinder: radius = r, height = h — correct proportions
+    // Cylinder: radius and height use the entered values.
     aframe: (v) => {
       const unit = visualUnitFor(Math.max((+v.r || 1) * 2, +v.h || 1));
       const r=+v.r*unit, h=+v.h*unit;
@@ -945,7 +946,7 @@ const SHAPES = {
       { key:'b', label:{ en:'Base Side (cm)', ar:'ضلع القاعدة (سم)' }, placeholder:'6' },
       { key:'h', label:{ en:'Height (cm)',    ar:'الارتفاع (سم)'    }, placeholder:'8' },
     ],
-    // 4-sided pyramid using a-cone with segments-radial=4
+    // A cone with 4 sides makes a square pyramid.
     aframe: (v) => {
       const unit = visualUnitFor(Math.max(+v.b || 1, +v.h || 1));
       const b=+v.b*unit*0.7, h=+v.h*unit;
@@ -1070,7 +1071,7 @@ const SHAPES = {
       { key:'w', label:{ en:'Width (cm)',  ar:'العرض (سم)'  }, placeholder:'5' },
       { key:'h', label:{ en:'Height (cm)', ar:'الارتفاع (سم)' }, placeholder:'4' },
     ],
-    // cuboid: width=l, depth=w, height=h — all different, preserving exact shape
+    // Cuboid: length, width, and height can all be different.
     aframe: (v) => {
       const unit = visualUnitFor(Math.max(+v.l || 1, +v.w || 1, +v.h || 1));
       const l=+v.l*unit, w=+v.w*unit, h=+v.h*unit;
@@ -1192,20 +1193,14 @@ const SHAPES = {
   },
 };
 
-// ─────────────────────────────────────────────
-// STATE
-// ─────────────────────────────────────────────
+// App state
 let selectedShape = null;
 let inputValues   = {};
 let currentRotX   = 0;
 let currentRotY   = 0;
 const lastQuizSignatures = {};
 
-// ─────────────────────────────────────────────
-// FLOATING AR LABELS
-// Canvas textures keep labels readable above the model, support Arabic,
-// and disable depth testing so labels are never hidden by large shapes.
-// ─────────────────────────────────────────────
+// Floating labels above the AR model
 function makeLabelTexture(text, color, fontSize = 78) {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
@@ -1264,25 +1259,23 @@ function clearFloatingLabels() {
   });
 }
 
-// quiz state
+// Quiz state
 let quizList     = [];
 let quizIndex    = 0;
 let quizScore    = 0;
-let quizTimeLeft = 300; // 5 minutes
+let quizTimeLeft = 300; // Five minutes
 let quizTimerId  = null;
 let quizDone     = false;
 let quizStarted  = false;
 let questionLocked = false;
 
-// panel resize
+// Panel resize
 let panelH = 44;
 let isResizing = false;
 let resizeStartY = 0;
 let resizeStartH = 44;
 
-// ─────────────────────────────────────────────
-// PANEL RESIZE
-// ─────────────────────────────────────────────
+// Bottom panel resizing
 function setPanel(vh) {
   panelH = Math.max(18, Math.min(80, vh));
   document.getElementById('infoPanel').style.height = panelH + 'vh';
@@ -1301,22 +1294,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }, {passive:true});
   document.addEventListener('touchend', () => { isResizing=false; });
 
-  // marker events
+  // Marker events
   const marker = document.getElementById('hiroMarker');
   const pill   = document.getElementById('markerPill');
-  marker.addEventListener('markerFound', () => {
-    pill.textContent = t('markerFound');
-    pill.classList.add('found');
-  });
-  marker.addEventListener('markerLost', () => {
-    pill.innerHTML = '🔍 ' + t('scanHint');
-    pill.classList.remove('found');
-  });
+  marker.addEventListener('markerFound', () => setMarkerPill(true));
+  marker.addEventListener('markerLost', () => setMarkerPill(false));
 });
 
-// ─────────────────────────────────────────────
-// SHAPE PICKER
-// ─────────────────────────────────────────────
+// Shape picker
 function selectShape(key) {
   selectedShape = key;
   const shape = SHAPES[key];
@@ -1351,9 +1336,7 @@ function goBack() {
   document.getElementById('shapePicker').style.display = 'flex';
 }
 
-// ─────────────────────────────────────────────
-// LAUNCH SHAPE
-// ─────────────────────────────────────────────
+// Launch the selected shape
 function launchShape() {
   const shape = SHAPES[selectedShape];
   inputValues = {};
@@ -1365,11 +1348,11 @@ function launchShape() {
   });
   if (!valid) { alert(currentLang==='ar'?'يرجى إدخال أبعاد صحيحة!':'Please enter valid dimensions!'); return; }
 
-  // inject shape
+  // Put the model on the marker.
   document.getElementById('shapeEntity').innerHTML = shape.aframe(inputValues);
+  requestAnimationFrame(keepModelVisible);
 
-  // text must sit ABOVE the true shape top — shape top = shapeH (since base is at 0)
-  // use the real input-derived height so large shapes never cover the labels
+  // Put the text above the top of the model.
   const shapeTop = shape.shapeH(inputValues);
   const textBase  = shapeTop + 0.14;
 
@@ -1377,7 +1360,7 @@ function launchShape() {
   document.getElementById('dimLabel').setAttribute('position',    `0 ${(textBase + 0.13).toFixed(2)} 0`);
   document.getElementById('resultLabel').setAttribute('position', `0 ${textBase.toFixed(2)} 0`);
 
-  // show text in current language
+  // Show text in the current language.
   updateFloatingLabels();
 
   rotYaw = 0; rotPitch = 0;
@@ -1394,21 +1377,19 @@ function launchShape() {
   AC.resume();
 }
 
-// ─────────────────────────────────────────────
-// INFO PANEL
-// ─────────────────────────────────────────────
+// Info panel
 function buildInfoPanel() {
   const shape = SHAPES[selectedShape];
   const v = inputValues;
 
-  // stats
+  // Stats
   document.getElementById('statGrid').innerHTML = shape.stats(v).map(s => `
     <div class="stat-card">
       <div class="stat-label">${s.label[currentLang]}</div>
       <div class="stat-value">${s.value} <span class="stat-unit">${s.unit}</span></div>
     </div>`).join('');
 
-  // formulas
+  // Formulas
   document.getElementById('formulaSteps').innerHTML = shape.formulas(v).map(f => `
     <div class="formula-step">
       <div class="step-title">${f.title[currentLang]}</div>
@@ -1416,11 +1397,11 @@ function buildInfoPanel() {
       <div class="step-result">✓ ${f.result}</div>
     </div>`).join('');
 
-  // facts
+  // Facts
   document.getElementById('factCards').innerHTML = shape.facts[currentLang].map(f => `
     <div class="fact-card">${f}</div>`).join('');
 
-  // update change shape button
+  // Update the change shape button.
   const cb = document.querySelector('.change-btn');
   if (cb) cb.textContent = t('changeShape');
 }
@@ -1442,9 +1423,7 @@ function showTab(name, btn) {
   if (name === 'quiz' && !quizStarted) startQuiz();
 }
 
-// ─────────────────────────────────────────────
-// QUIZ ENGINE — MCQ style
-// ─────────────────────────────────────────────
+// Quiz questions
 const ANSWER_TOKENS = {
   TRUE:        { en:'True',                         ar:'صح' },
   FALSE:       { en:'False',                        ar:'خطأ' },
@@ -1515,7 +1494,7 @@ function startQuiz() {
   let picked = [];
   let signature = '';
 
-  // Pick 5 distinct questions. If the user retries, avoid serving the exact same set when possible.
+  // Pick five questions and try not to repeat the last set.
   for (let attempt = 0; attempt < 10; attempt++) {
     picked = shuffleArray(bank).slice(0, Math.min(5, bank.length));
     signature = picked.map(q => q.q.en).sort().join('|');
@@ -1572,7 +1551,7 @@ function selectAnswer(btn, answer) {
   const q = quizList[quizIndex];
   const isCorrect = answer === q.correct;
 
-  // highlight correct button green, wrong button red
+  // Mark the right and wrong answers.
   document.querySelectorAll('.quiz-choice').forEach(b => {
     const raw = b.dataset.raw || '';
     if (raw === q.correct) b.classList.add('correct');
@@ -1642,15 +1621,10 @@ function retryQuiz() {
   startQuiz();
 }
 
-// ─────────────────────────────────────────────
-// TOUCH SPIN — rotate shape wrapper by dragging
-// Rotates only around the marker's vertical axis. This preserves each model's
-// entered dimensions visually and avoids the pitch/skew distortion that made
-// boxes and other shapes look stretched while dragging.
-// ─────────────────────────────────────────────
+// Dragging the screen spins the shape
 let touchStartX = 0, touchStartY = 0, isDragging = false;
-let rotYaw = 0;    // horizontal rotation (Y axis)
-let rotPitch = 0;  // kept for launch reset compatibility; dragging no longer pitches shapes
+let rotYaw = 0;    // Left and right spin
+let rotPitch = 0;  // Reset value used when a shape launches
 
 document.addEventListener('touchstart', e => {
   if (e.target.closest('#infoPanel') || e.target.closest('.topbar') ||
@@ -1667,8 +1641,7 @@ document.addEventListener('touchmove', e => {
   rotYaw += dx * 0.4;
   rotPitch = 0;
 
-  // rotate the WRAPPER, not the shape, and only yaw it so scale/proportions stay exact
-  // while text labels outside wrapper are never affected
+  // Spin only the wrapper so labels stay straight.
   const wrapper = document.getElementById('shapeWrapper');
   if (wrapper) wrapper.setAttribute('rotation', `0 ${rotYaw} 0`);
 
@@ -1678,9 +1651,7 @@ document.addEventListener('touchmove', e => {
 
 document.addEventListener('touchend', () => { isDragging = false; });
 
-// ─────────────────────────────────────────────
-// CAMERA FIX
-// ─────────────────────────────────────────────
+// Camera and AR layer fix
 function syncCameraLayers() {
   const width = Math.ceil(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth);
   const height = Math.ceil(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight);
@@ -1690,12 +1661,17 @@ function syncCameraLayers() {
     v.style.cssText = `${fillStyle}object-fit:cover!important;z-index:0!important;background:#000!important;`;
   });
 
-  document.querySelectorAll('canvas').forEach(c => {
-    c.style.cssText = `${fillStyle}z-index:1!important;pointer-events:none!important;`;
+  const scene = document.querySelector('a-scene');
+  if (scene) {
+    scene.style.cssText = `${fillStyle}z-index:2!important;pointer-events:none!important;`;
+  }
+
+  document.querySelectorAll('canvas, .a-canvas').forEach(c => {
+    c.style.cssText = `${fillStyle}z-index:2!important;pointer-events:none!important;background:transparent!important;`;
   });
 
-  const scene = document.querySelector('a-scene');
   if (scene?.renderer) {
+    scene.renderer.setClearColor(0x000000, 0);
     scene.renderer.setSize(width, height, false);
     if (scene.camera) {
       scene.camera.aspect = width / height;
@@ -1704,10 +1680,19 @@ function syncCameraLayers() {
   }
 }
 
+function keepModelVisible() {
+  const model = document.getElementById('shapeEntity');
+  if (!model?.object3D) return;
+  model.object3D.visible = true;
+  model.object3D.traverse(obj => {
+    obj.frustumCulled = false;
+    if (obj.isMesh) obj.renderOrder = 20;
+  });
+}
+
 window.addEventListener('load', () => {
   syncCameraLayers();
-  const layerFix = setInterval(syncCameraLayers, 250);
-  setTimeout(() => clearInterval(layerFix), 5000);
+  setInterval(syncCameraLayers, 500);
 });
 window.addEventListener('resize', syncCameraLayers);
 window.addEventListener('orientationchange', () => setTimeout(syncCameraLayers, 250));
