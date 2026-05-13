@@ -1367,9 +1367,13 @@ function startQuiz() {
   // get the full question bank for this shape
   const bank = SHAPES[selectedShape].quiz(inputValues);
 
-  // shuffle and pick 5 random unique questions
-  const shuffled = bank.sort(() => Math.random() - 0.5);
-  quizList = shuffled.slice(0, 5);
+  // build exactly 5 questions, reusing smaller question banks so the quiz never runs out
+  const shuffled = [...bank].sort(() => Math.random() - 0.5);
+  quizList = [];
+  while (quizList.length < 5 && shuffled.length > 0) {
+    quizList.push(...shuffled);
+  }
+  quizList = quizList.slice(0, 5);
 
   renderQuestion();
   startQuizTimer();
