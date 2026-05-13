@@ -46,20 +46,28 @@
     }
 
     html, body {
-      overflow: hidden; width: 100%; height: 100%;
+      overflow: hidden; width: 100vw; height: 100vh; height: 100dvh;
       font-family: 'Nunito', sans-serif;
-      background: var(--bg); color: var(--text);
+      background: #000; color: var(--text);
     }
 
     /* camera and canvas layers */
-    video {
-      position: fixed !important; top: 0 !important; left: 0 !important;
-      width: 100vw !important; height: 100vh !important;
-      object-fit: cover !important; z-index: 0 !important;
+    a-scene, .a-canvas, video, canvas {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      width: 100dvw !important;
+      height: 100vh !important;
+      height: 100dvh !important;
+      min-width: 100vw !important;
+      min-height: 100vh !important;
     }
-    canvas {
-      position: fixed !important; top: 0 !important; left: 0 !important;
-      width: 100vw !important; height: 100vh !important;
+    video {
+      object-fit: cover !important; z-index: 0 !important;
+      transform: translateZ(0);
+      background: #000 !important;
+    }
+    canvas, .a-canvas {
       z-index: 1 !important; pointer-events: none !important;
     }
 
@@ -379,7 +387,7 @@
   embedded
   arjs="sourceType: webcam; debugUIEnabled: false; zoom: 1;"
   vr-mode-ui="enabled: false"
-  renderer="logarithmicDepthBuffer: true;"
+  renderer="logarithmicDepthBuffer: true; antialias: true;"
 >
   <a-marker id="hiroMarker" preset="hiro" smooth="true" smoothCount="10" smoothTolerance="0.01" smoothThreshold="5">
     <!-- shapeWrapper is what we rotate — text labels are separate so they don't distort -->
@@ -670,11 +678,16 @@ function showFeedbackOverlay(isCorrect) {
 
 // ─────────────────────────────────────────────
 // SHAPES — Accurate 3D models
-// Key fix: ALL shapes use scale="1 1 1" and correct dimensions
-// A-Frame 1 unit = 1 meter. We divide cm by 100 to get meters.
-// e.g. 5cm cube → 0.05 units. This keeps proportions perfectly accurate.
+// Key fix: ALL shapes use scale="1 1 1" and preserve entered proportions.
+// Larger inputs are fitted down uniformly so cubes stay cubical and models remain
+// readable on the Hiro marker without stretching one axis differently.
 // ─────────────────────────────────────────────
-const CM = 0.07; // 1 cm = 0.07 A-Frame units — makes shapes visible and proportional
+const CM = 0.07; // baseline visual size for normal inputs
+const MAX_VISUAL_SIZE = 0.52; // keep large inputs readable on the Hiro marker
+
+function visualUnitFor(maxCm) {
+  return Math.min(CM, MAX_VISUAL_SIZE / Math.max(+maxCm || 1, 1));
+}
 
 const SHAPES = {
 
@@ -685,8 +698,12 @@ const SHAPES = {
     ],
     // cube: width=height=depth=a — perfect cube every time
     aframe: (v) => {
-      const s = +v.a * CM;
-      return `<a-box width="${s}" height="${s}" depth="${s}" color="#3B82F6" opacity="0.88" position="0 ${(s/2).toFixed(3)} 0" scale="1 1 1"></a-box>`;
+      const unit = visualUnitFor(+v.a);
+      const s = +v.a * unit;
+      return `<a-entity>
+        <a-box width="${s}" height="${s}" depth="${s}" color="#3B82F6" opacity="0.86" position="0 ${(s/2).toFixed(3)} 0" scale="1 1 1"></a-box>
+        <a-box width="${s}" height="${s}" depth="${s}" position="0 ${(s/2).toFixed(3)} 0" material="color:#06111F; wireframe:true; transparent:true; opacity:0.95"></a-box>
+      </a-entity>`;
     },
     stats: (v) => {
       const a = +v.a;
@@ -733,7 +750,7 @@ const SHAPES = {
         { q:{en:`A cube has side ${a} cm. What is the area of ONE face?`,ar:`مكعب ضلعه ${a} سم. ما مساحة وجه واحد؟`}, correct:(a*a).toFixed(0)+' cm²', wrongs:[(a*a*2).toFixed(0)+' cm²',(a*6).toFixed(0)+' cm²',(a*a*a).toFixed(0)+' cm³'] },
       ];
     },
-    shapeH: (v) => +v.a * CM,
+    shapeH: (v) => +v.a * visualUnitFor(+v.a),
     label:  (v) => `a = ${v.a} cm`,
     result: (v) => { const a=+v.a; return `V=${Math.pow(a,3).toFixed(1)}cm³`; },
   },
@@ -745,8 +762,9 @@ const SHAPES = {
     ],
     // sphere: radius = r — perfectly round in all directions
     aframe: (v) => {
-      const r = +v.r * CM;
-      return `<a-sphere radius="${r}" color="#FB923C" opacity="0.88" position="0 ${r.toFixed(3)} 0" scale="1 1 1"></a-sphere>`;
+      const unit = visualUnitFor((+v.r || 1) * 2);
+      const r = +v.r * unit;
+      return `<a-sphere radius="${r}" color="#FB923C" opacity="0.88" position="0 ${r.toFixed(3)} 0" scale="1 1 1" segments-width="48" segments-height="32"></a-sphere>`;
     },
     stats: (v) => {
       const r=+v.r, pi=Math.PI;
@@ -786,9 +804,14 @@ const SHAPES = {
         { q:{en:`A sphere has radius ${r} cm. What is its surface area? (Use π≈3.14)`,ar:`كرة نصف قطرها ${r} سم. ما مساحة سطحها؟ (استخدم π≈3.14)`}, correct:(4*pi*r*r).toFixed(0)+' cm²', wrongs:[(2*pi*r*r).toFixed(0)+' cm²', ((4/3)*pi*r*r*r).toFixed(0)+' cm³', (pi*r*r).toFixed(0)+' cm²'] },
         { q:{en:`A sphere has NO edges. True or False?`,ar:`الكرة ليس لها حواف. صح أم خطأ؟`}, correct:'TRUE', wrongs:['FALSE'] },
         { q:{en:`What formula gives the volume of a sphere?`,ar:'ما معادلة حجم الكرة؟'}, correct:'(4/3)πr³', wrongs:['πr²h','4πr²','(1/3)πr²h'] },
+        { q:{en:`What is the diameter of a sphere with radius ${r} cm?`,ar:`إذا كان نصف قطر الكرة ${r} سم، فما قطرها؟`}, correct:(2*r).toFixed(0)+' cm', wrongs:[r.toFixed(0)+' cm',(r*r).toFixed(0)+' cm²',(4*r).toFixed(0)+' cm'] },
+        { q:{en:`Every point on a sphere is the same distance from its center. True or False?`,ar:'كل نقطة على سطح الكرة تبعد المسافة نفسها عن مركزها. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`Which everyday object is closest to a sphere?`,ar:'أي جسم من الحياة اليومية أقرب إلى شكل الكرة؟'}, correct:'BALL_ANS', wrongs:['CAN_ANS','DICE_ANS','CONE_ANS'] },
+        { q:{en:`How many vertices does a sphere have?`,ar:'كم رأساً للكرة؟'}, correct:'0', wrongs:['1','2','8'] },
+        { q:{en:`A great circle cuts a sphere into two equal halves. True or False?`,ar:'الدائرة الكبرى تقسم الكرة إلى نصفين متساويين. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
       ];
     },
-    shapeH: (v) => +v.r * CM * 2,
+    shapeH: (v) => +v.r * visualUnitFor((+v.r || 1) * 2) * 2,
     label:  (v) => `r = ${v.r} cm`,
     result: (v) => { const r=+v.r,pi=Math.PI; return `V=${((4/3)*pi*r*r*r).toFixed(1)}cm³`; },
   },
@@ -801,7 +824,8 @@ const SHAPES = {
     ],
     // cylinder: radius = r, height = h — correct proportions
     aframe: (v) => {
-      const r=+v.r*CM, h=+v.h*CM;
+      const unit = visualUnitFor(Math.max((+v.r || 1) * 2, +v.h || 1));
+      const r=+v.r*unit, h=+v.h*unit;
       return `<a-cylinder radius="${r}" height="${h}" color="#4ADE80" opacity="0.88" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cylinder>`;
     },
     stats: (v) => {
@@ -842,9 +866,14 @@ const SHAPES = {
         { q:{en:`A cylinder has radius ${r} cm and height ${h} cm. What is its volume? (Use π≈3.14)`,ar:`أسطوانة نصف قطرها ${r} سم وارتفاعها ${h} سم. ما حجمها؟ (استخدم π≈3.14)`}, correct:(pi*r*r*h).toFixed(0)+' cm³', wrongs:[(2*pi*r*h).toFixed(0)+' cm²', (pi*r*r).toFixed(0)+' cm²', (pi*r*(r+h)).toFixed(0)+' cm²'] },
         { q:{en:`How many flat faces does a cylinder have?`,ar:'كم وجهاً مسطحاً للأسطوانة؟'}, correct:'2', wrongs:['1','3','4'] },
         { q:{en:`A cylinder's volume formula is πr²h. True or False?`,ar:'معادلة حجم الأسطوانة هي πr²h. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`What is the area of one circular base? (Use π≈3.14)`,ar:'ما مساحة قاعدة دائرية واحدة للأسطوانة؟ (استخدم π≈3.14)'}, correct:(pi*r*r).toFixed(0)+' cm²', wrongs:[(2*pi*r).toFixed(0)+' cm',(pi*r*r*h).toFixed(0)+' cm³',(2*pi*r*h).toFixed(0)+' cm²'] },
+        { q:{en:`A cylinder has one curved side surface. True or False?`,ar:'للأسطوانة سطح جانبي منحنٍ واحد. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`Which object is usually a cylinder?`,ar:'أي جسم يكون عادةً على شكل أسطوانة؟'}, correct:'CAN_ANS', wrongs:['DICE_ANS','BALL_ANS','PYRAMID_ANS'] },
+        { q:{en:`If the height gets bigger, the cylinder volume gets bigger too. True or False?`,ar:'إذا زاد ارتفاع الأسطوانة فإن حجمها يزداد أيضاً. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`How many circular bases does a cylinder have?`,ar:'كم قاعدة دائرية للأسطوانة؟'}, correct:'2', wrongs:['0','1','3'] },
       ];
     },
-    shapeH: (v) => +v.h * CM,
+    shapeH: (v) => +v.h * visualUnitFor(Math.max((+v.r || 1) * 2, +v.h || 1)),
     label:  (v) => `r=${v.r}cm  h=${v.h}cm`,
     result: (v) => { const r=+v.r,h=+v.h,pi=Math.PI; return `V=${(pi*r*r*h).toFixed(1)}cm³`; },
   },
@@ -856,7 +885,8 @@ const SHAPES = {
       { key:'h', label:{ en:'Height (cm)',       ar:'الارتفاع (سم)'        }, placeholder:'7' },
     ],
     aframe: (v) => {
-      const r=+v.r*CM, h=+v.h*CM;
+      const unit = visualUnitFor(Math.max((+v.r || 1) * 2, +v.h || 1));
+      const r=+v.r*unit, h=+v.h*unit;
       return `<a-cone radius-bottom="${r}" radius-top="0.001" height="${h}" color="#FB923C" opacity="0.88" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cone>`;
     },
     stats: (v) => {
@@ -897,9 +927,14 @@ const SHAPES = {
         { q:{en:`A cone has radius ${r} cm and height ${h} cm. What is its slant height?`,ar:`مخروط نصف قطره ${r} سم وارتفاعه ${h} سم. ما ارتفاعه المائل؟`}, correct:l.toFixed(1)+' cm', wrongs:[(h+1).toFixed(1)+' cm',(r+h).toFixed(1)+' cm',(l+2).toFixed(1)+' cm'] },
         { q:{en:`A cone has volume = (1/3)πr²h. True or False?`,ar:'حجم المخروط = (1/3)πr²h. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
         { q:{en:`How many flat faces does a cone have?`,ar:'كم وجهاً مسطحاً للمخروط؟'}, correct:'1', wrongs:['2','3','0'] },
+        { q:{en:`What is the pointed top of a cone called?`,ar:'ماذا تسمى النقطة العليا في المخروط؟'}, correct:'APEX_ANS', wrongs:['BASE_ANS','EDGE_ANS','CENTER_ANS'] },
+        { q:{en:`A cone has one circular base. True or False?`,ar:'للمخروط قاعدة دائرية واحدة. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`Which item is shaped like a cone?`,ar:'أي شيء يشبه المخروط؟'}, correct:'ICE_CREAM_CONE', wrongs:['DICE_ANS','CAN_ANS','BALL_ANS'] },
+        { q:{en:`A cone's volume is one third of a cylinder with the same radius and height. True or False?`,ar:'حجم المخروط يساوي ثلث أسطوانة لها نصف القطر والارتفاع نفسيهما. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`The slant height is measured along the side of the cone. True or False?`,ar:'الارتفاع المائل يُقاس على جانب المخروط. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
       ];
     },
-    shapeH: (v) => +v.h * CM,
+    shapeH: (v) => +v.h * visualUnitFor(Math.max((+v.r || 1) * 2, +v.h || 1)),
     label:  (v) => `r=${v.r}cm  h=${v.h}cm`,
     result: (v) => { const r=+v.r,h=+v.h,pi=Math.PI,l=Math.sqrt(r*r+h*h); return `V=${((1/3)*pi*r*r*h).toFixed(1)}cm³  l=${l.toFixed(1)}cm`; },
   },
@@ -912,7 +947,8 @@ const SHAPES = {
     ],
     // 4-sided pyramid using a-cone with segments-radial=4
     aframe: (v) => {
-      const b=+v.b*CM*0.7, h=+v.h*CM;
+      const unit = visualUnitFor(Math.max(+v.b || 1, +v.h || 1));
+      const b=+v.b*unit*0.7, h=+v.h*unit;
       return `<a-cone radius-bottom="${b}" radius-top="0.001" height="${h}" color="#FBBF24" opacity="0.88" segments-radial="4" position="0 ${(h/2).toFixed(3)} 0" rotation="0 45 0" scale="1 1 1"></a-cone>`;
     },
     stats: (v) => {
@@ -953,9 +989,14 @@ const SHAPES = {
         { q:{en:`A pyramid has base side ${b} cm and height ${h} cm. What is its volume?`,ar:`هرم قاعدته ${b} سم وارتفاعه ${h} سم. ما حجمه؟`}, correct:((1/3)*b*b*h).toFixed(0)+' cm³', wrongs:[(b*b*h).toFixed(0)+' cm³',((1/2)*b*b*h).toFixed(0)+' cm³',(b*b).toFixed(0)+' cm²'] },
         { q:{en:`How many faces does a square pyramid have?`,ar:'كم وجهاً للهرم الرباعي؟'}, correct:'5', wrongs:['4','6','8'] },
         { q:{en:`A pyramid's volume is 1/3 of a box with same base and height. True or False?`,ar:'حجم الهرم ثلث المنشور بنفس القاعدة والارتفاع. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`What shape is the base of a square pyramid?`,ar:'ما شكل قاعدة الهرم الرباعي؟'}, correct:'SQUARE_ANS', wrongs:['CIRCLE_ANS','TRIANGLE_ANS','RECTANGLE_ANS'] },
+        { q:{en:`How many triangular side faces does a square pyramid have?`,ar:'كم وجهاً مثلثياً جانبياً للهرم الرباعي؟'}, correct:'4', wrongs:['3','5','6'] },
+        { q:{en:`The top point of a pyramid is called the apex. True or False?`,ar:'النقطة العليا في الهرم تسمى الرأس. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`A square pyramid has 8 edges. True or False?`,ar:'للهرم الرباعي 8 حواف. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`The base area of this square pyramid is what?`,ar:'ما مساحة قاعدة هذا الهرم الرباعي؟'}, correct:(b*b).toFixed(0)+' cm²', wrongs:[(4*b).toFixed(0)+' cm',(b*h).toFixed(0)+' cm²',((1/3)*b*b*h).toFixed(0)+' cm³'] },
       ];
     },
-    shapeH: (v) => +v.h * CM,
+    shapeH: (v) => +v.h * visualUnitFor(Math.max(+v.b || 1, +v.h || 1)),
     label:  (v) => `b=${v.b}cm  h=${v.h}cm`,
     result: (v) => { const b=+v.b,h=+v.h; return `V=${((1/3)*b*b*h).toFixed(1)}cm³`; },
   },
@@ -967,8 +1008,10 @@ const SHAPES = {
       { key:'r', label:{ en:'Minor Radius (cm)', ar:'نصف القطر الصغير (سم)' }, placeholder:'2' },
     ],
     aframe: (v) => {
-      const R=+v.R*CM, r=+v.r*CM;
-      return `<a-torus radius="${R}" radius-tubular="${r}" color="#A78BFA" opacity="0.88" position="0 ${r.toFixed(3)} 0" scale="1 1 1"></a-torus>`;
+      const unit = visualUnitFor(((+v.R || 1) + (+v.r || 1)) * 2);
+      const R=+v.R*unit, r=+v.r*unit;
+      const centerY = R + r;
+      return `<a-torus radius="${R}" radius-tubular="${r}" color="#A78BFA" opacity="0.88" position="0 ${centerY.toFixed(3)} 0" scale="1 1 1"></a-torus>`;
     },
     stats: (v) => {
       const R=+v.R, r=+v.r, pi=Math.PI;
@@ -1006,11 +1049,16 @@ const SHAPES = {
       const R=+v.R||5, r=+v.r||2, pi=Math.PI;
       return [
         { q:{en:`What does the major radius R represent in a torus?`,ar:'ماذا يمثل نصف القطر الكبير R في الحلقي؟'}, correct:'DIST_CENTER', wrongs:['THICK_TUBE','RING_LEN','HALF_RING'] },
-        { q:{en:`A torus has R=${R} cm and r=${r} cm. What is its surface area? (Use π²≈9.87)`,ar:`حلقي لها R=${R} سم و r=${r} سم. ما مساحة سطحها؟ (استخدم π²≈9.87)`}, correct:(4*pi*pi*R*r).toFixed(0)+' cm²', wrongs:[(2*pi*pi*R*r*r).toFixed(0)+' cm³',(2*pi*R).toFixed(0)+' cm',(4*pi*R*r).toFixed(0)+' cm²'] },
+        { q:{en:`A torus has R=${R} cm and r=${r} cm. What is its surface area? (Use π²≈9.87)`,ar:`شكل حلقي له R=${R} سم و r=${r} سم. ما مساحة سطحه؟ (استخدم π²≈9.87)`}, correct:(4*pi*pi*R*r).toFixed(0)+' cm²', wrongs:[(2*pi*pi*R*r*r).toFixed(0)+' cm³',(2*pi*R).toFixed(0)+' cm',(4*pi*R*r).toFixed(0)+' cm²'] },
         { q:{en:`Bicycle tires are a real-life example of a torus shape. True or False?`,ar:'إطارات الدراجات مثال حقيقي على شكل الحلقي. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`What does the minor radius r describe?`,ar:'ماذا يصف نصف القطر الصغير r؟'}, correct:'THICK_TUBE', wrongs:['DIST_CENTER','RING_LEN','HALF_RING'] },
+        { q:{en:`A torus looks like a 3D ring or doughnut. True or False?`,ar:'الشكل الحلقي يشبه حلقة أو كعكة دونات ثلاثية الأبعاد. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`The outer radius of this torus is R + r. What is it?`,ar:'نصف القطر الخارجي للحلقي هو R + r. كم يساوي؟'}, correct:(R+r).toFixed(0)+' cm', wrongs:[Math.abs(R-r).toFixed(0)+' cm',(2*R).toFixed(0)+' cm',(2*r).toFixed(0)+' cm'] },
+        { q:{en:`Which item is closest to a torus shape?`,ar:'أي شيء أقرب إلى الشكل الحلقي؟'}, correct:'TIRE_ANS', wrongs:['BALL_ANS','DICE_ANS','PYRAMID_ANS'] },
+        { q:{en:`A torus has a hole through the middle. True or False?`,ar:'للشكل الحلقي فتحة في الوسط. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
       ];
     },
-    shapeH: (v) => +v.r * CM * 2,
+    shapeH: (v) => ((+v.R || 1) + (+v.r || 1)) * visualUnitFor(((+v.R || 1) + (+v.r || 1)) * 2) * 2,
     label:  (v) => `R=${v.R}cm  r=${v.r}cm`,
     result: (v) => { const R=+v.R,r=+v.r,pi=Math.PI; return `V=${(2*pi*pi*R*r*r).toFixed(1)}cm³`; },
   },
@@ -1024,8 +1072,12 @@ const SHAPES = {
     ],
     // cuboid: width=l, depth=w, height=h — all different, preserving exact shape
     aframe: (v) => {
-      const l=+v.l*CM, w=+v.w*CM, h=+v.h*CM;
-      return `<a-box width="${l}" height="${h}" depth="${w}" color="#F472B6" opacity="0.88" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-box>`;
+      const unit = visualUnitFor(Math.max(+v.l || 1, +v.w || 1, +v.h || 1));
+      const l=+v.l*unit, w=+v.w*unit, h=+v.h*unit;
+      return `<a-entity>
+        <a-box width="${l}" height="${h}" depth="${w}" color="#F472B6" opacity="0.86" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-box>
+        <a-box width="${l}" height="${h}" depth="${w}" position="0 ${(h/2).toFixed(3)} 0" material="color:#2A0B1C; wireframe:true; transparent:true; opacity:0.9"></a-box>
+      </a-entity>`;
     },
     stats: (v) => {
       const l=+v.l, w=+v.w, h=+v.h;
@@ -1065,9 +1117,14 @@ const SHAPES = {
         { q:{en:`A cuboid has l=${l}cm, w=${w}cm, h=${h}cm. What is its volume?`,ar:`متوازي مستطيلات: ط=${l}، ع=${w}، ار=${h} سم. ما حجمه؟`}, correct:(l*w*h).toFixed(0)+' cm³', wrongs:[(2*(l*w+l*h+w*h)).toFixed(0)+' cm²',(l*w+w*h).toFixed(0)+' cm²',(l+w+h).toFixed(0)+' cm'] },
         { q:{en:`How many faces does a cuboid have?`,ar:'كم وجهاً لمتوازي المستطيلات؟'}, correct:'6', wrongs:['4','8','12'] },
         { q:{en:`A cube is a special cuboid where all sides are equal. True or False?`,ar:'المكعب متوازي مستطيلات خاص تتساوى فيه جميع الأضلاع. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`How many edges does a cuboid have?`,ar:'كم حافة لمتوازي المستطيلات؟'}, correct:'12', wrongs:['6','8','10'] },
+        { q:{en:`What is the area of the length × width face?`,ar:'ما مساحة الوجه الذي أبعاده الطول × العرض؟'}, correct:(l*w).toFixed(0)+' cm²', wrongs:[(l+h).toFixed(0)+' cm',(w*h).toFixed(0)+' cm²',(l*w*h).toFixed(0)+' cm³'] },
+        { q:{en:`Opposite faces of a cuboid are equal rectangles. True or False?`,ar:'الأوجه المتقابلة في متوازي المستطيلات مستطيلات متساوية. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`Which item is usually a cuboid?`,ar:'أي جسم يكون غالباً على شكل متوازي مستطيلات؟'}, correct:'SHOEBOX_ANS', wrongs:['BALL_ANS','TIRE_ANS','ICE_CREAM_CONE'] },
+        { q:{en:`A cuboid can have three different side lengths. True or False?`,ar:'يمكن أن تكون لمتوازي المستطيلات ثلاثة أبعاد مختلفة. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
       ];
     },
-    shapeH: (v) => +v.h * CM,
+    shapeH: (v) => +v.h * visualUnitFor(Math.max(+v.l || 1, +v.w || 1, +v.h || 1)),
     label:  (v) => `${v.l} x ${v.w} x ${v.h} cm`,
     result: (v) => { const l=+v.l,w=+v.w,h=+v.h; return `V=${(l*w*h).toFixed(1)}cm³`; },
   },
@@ -1080,7 +1137,8 @@ const SHAPES = {
       { key:'l', label:{ en:'Prism Length (cm)',    ar:'طول المنشور (سم)'    }, placeholder:'9' },
     ],
     aframe: (v) => {
-      const r=+v.a*CM*0.6, h=+v.l*CM;
+      const unit = visualUnitFor(Math.max(+v.a || 1, +v.b || 1, +v.l || 1));
+      const r=+v.a*unit*0.6, h=+v.l*unit;
       return `<a-cylinder radius="${r}" height="${h}" color="#22D3EE" opacity="0.88" segments-radial="3" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cylinder>`;
     },
     stats: (v) => {
@@ -1121,9 +1179,14 @@ const SHAPES = {
         { q:{en:`A triangle has base ${a} cm and height ${b} cm. What is its area?`,ar:`مثلث قاعدته ${a} سم وارتفاعه ${b} سم. ما مساحته؟`}, correct:tri.toFixed(0)+' cm²', wrongs:[(a*b).toFixed(0)+' cm²',((1/3)*a*b).toFixed(0)+' cm²',(a+b).toFixed(0)+' cm'] },
         { q:{en:`A triangular prism has 5 faces. True or False?`,ar:'للمنشور المثلثي 5 أوجه. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
         { q:{en:`What splits light into rainbow colors?`,ar:'ما الذي يُقسّم الضوء إلى ألوان قوس قزح؟'}, correct:'GLASS_PRISM', wrongs:['CUBE_ANS','SPHERE_ANS','CYLINDER_ANS'] },
+        { q:{en:`A triangular prism has two triangular bases. True or False?`,ar:'للمنشور المثلثي قاعدتان مثلثيتان. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`How many rectangular side faces does a triangular prism have?`,ar:'كم وجهاً جانبياً مستطيلاً للمنشور المثلثي؟'}, correct:'3', wrongs:['2','4','5'] },
+        { q:{en:`What is the prism volume?`,ar:'ما حجم هذا المنشور المثلثي؟'}, correct:(tri*l).toFixed(0)+' cm³', wrongs:[tri.toFixed(0)+' cm²',(a*b*l).toFixed(0)+' cm³',(a+b+l).toFixed(0)+' cm'] },
+        { q:{en:`The base area of a triangular prism can be found with 1/2 × base × height. True or False?`,ar:'مساحة قاعدة المنشور المثلثي تُحسب بـ 1/2 × القاعدة × الارتفاع. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
+        { q:{en:`Which shape is used for the two ends of a triangular prism?`,ar:'ما شكل الطرفين في المنشور المثلثي؟'}, correct:'TRIANGLE_ANS', wrongs:['SQUARE_ANS','CIRCLE_ANS','BALL_ANS'] },
       ];
     },
-    shapeH: (v) => +v.l * CM,
+    shapeH: (v) => +v.l * visualUnitFor(Math.max(+v.a || 1, +v.b || 1, +v.l || 1)),
     label:  (v) => `b=${v.a}  h=${v.b}  l=${v.l}cm`,
     result: (v) => { const a=+v.a,b=+v.b,l=+v.l; return `V=${(0.5*a*b*l).toFixed(1)}cm³`; },
   },
@@ -1136,6 +1199,7 @@ let selectedShape = null;
 let inputValues   = {};
 let currentRotX   = 0;
 let currentRotY   = 0;
+const lastQuizSignatures = {};
 
 // ─────────────────────────────────────────────
 // FLOATING AR LABELS
@@ -1381,24 +1445,51 @@ function showTab(name, btn) {
 // ─────────────────────────────────────────────
 // QUIZ ENGINE — MCQ style
 // ─────────────────────────────────────────────
-function buildChoices(correct, wrongs) {
-  const TOKENS = {
-    TRUE:        { en:'True',                    ar:'صح'                       },
-    FALSE:       { en:'False',                   ar:'خطأ'                      },
-    DIST_CENTER: { en:'Distance from center to tube', ar:'المسافة من المركز للأنبوب' },
-    THICK_TUBE:  { en:'Thickness of tube',       ar:'سُمك الأنبوب'             },
-    RING_LEN:    { en:'Length of ring',          ar:'طول الحلقة'               },
-    HALF_RING:   { en:'Half the ring radius',    ar:'نصف قطر الحلقة'           },
-    GLASS_PRISM: { en:'Glass prism',             ar:'المنشور الزجاجي'          },
-    CUBE_ANS:    { en:'Cube',                    ar:'المكعب'                   },
-    SPHERE_ANS:  { en:'Sphere',                  ar:'الكرة'                    },
-    CYLINDER_ANS:{ en:'Cylinder',               ar:'الأسطوانة'                },
-  };
-  function display(v) { return TOKENS[v] ? TOKENS[v][currentLang] : v; }
+const ANSWER_TOKENS = {
+  TRUE:        { en:'True',                         ar:'صح' },
+  FALSE:       { en:'False',                        ar:'خطأ' },
+  DIST_CENTER: { en:'Distance from center to tube', ar:'المسافة من المركز للأنبوب' },
+  THICK_TUBE:  { en:'Thickness of tube',            ar:'سُمك الأنبوب' },
+  RING_LEN:    { en:'Length of ring',               ar:'طول الحلقة' },
+  HALF_RING:   { en:'Half the ring radius',         ar:'نصف قطر الحلقة' },
+  GLASS_PRISM: { en:'Glass prism',                  ar:'المنشور الزجاجي' },
+  CUBE_ANS:    { en:'Cube',                         ar:'المكعب' },
+  SPHERE_ANS:  { en:'Sphere',                       ar:'الكرة' },
+  CYLINDER_ANS:{ en:'Cylinder',                     ar:'الأسطوانة' },
+  BALL_ANS:    { en:'Ball',                         ar:'كرة اللعب' },
+  CAN_ANS:     { en:'Can',                          ar:'علبة معدنية' },
+  DICE_ANS:    { en:'Dice',                         ar:'حجر نرد' },
+  CONE_ANS:    { en:'Cone',                         ar:'مخروط' },
+  PYRAMID_ANS: { en:'Pyramid',                      ar:'هرم' },
+  APEX_ANS:    { en:'Apex',                         ar:'الرأس' },
+  BASE_ANS:    { en:'Base',                         ar:'القاعدة' },
+  EDGE_ANS:    { en:'Edge',                         ar:'حافة' },
+  CENTER_ANS:  { en:'Center',                       ar:'المركز' },
+  ICE_CREAM_CONE:{ en:'Ice cream cone',             ar:'قمع الآيس كريم' },
+  SQUARE_ANS:  { en:'Square',                       ar:'مربع' },
+  CIRCLE_ANS:  { en:'Circle',                       ar:'دائرة' },
+  TRIANGLE_ANS:{ en:'Triangle',                     ar:'مثلث' },
+  RECTANGLE_ANS:{ en:'Rectangle',                   ar:'مستطيل' },
+  TIRE_ANS:    { en:'Tire',                         ar:'إطار سيارة' },
+  SHOEBOX_ANS: { en:'Shoebox',                      ar:'صندوق أحذية' },
+};
 
-  // build pool: correct + up to 3 wrongs, then shuffle
-  const pool = [correct, ...wrongs].sort(() => Math.random() - 0.5);
-  return pool.map(v => ({ raw: v, label: display(v) }));
+function answerLabel(v) {
+  return ANSWER_TOKENS[v] ? ANSWER_TOKENS[v][currentLang] : v;
+}
+
+function shuffleArray(items) {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function buildChoices(correct, wrongs) {
+  const pool = shuffleArray([correct, ...wrongs]);
+  return pool.map(v => ({ raw: v, label: answerLabel(v) }));
 }
 
 function resetQuiz() {
@@ -1420,16 +1511,19 @@ function startQuiz() {
   if (quizStarted || !selectedShape) return;
   quizStarted = true;
 
-  // get the full question bank for this shape
   const bank = SHAPES[selectedShape].quiz(inputValues);
+  let picked = [];
+  let signature = '';
 
-  // build exactly 5 questions, reusing smaller question banks so the quiz never runs out
-  const shuffled = [...bank].sort(() => Math.random() - 0.5);
-  quizList = [];
-  while (quizList.length < 5 && shuffled.length > 0) {
-    quizList.push(...shuffled);
+  // Pick 5 distinct questions. If the user retries, avoid serving the exact same set when possible.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    picked = shuffleArray(bank).slice(0, Math.min(5, bank.length));
+    signature = picked.map(q => q.q.en).sort().join('|');
+    if (signature !== lastQuizSignatures[selectedShape] || bank.length <= 5) break;
   }
-  quizList = quizList.slice(0, 5);
+
+  quizList = picked;
+  lastQuizSignatures[selectedShape] = signature;
 
   renderQuestion();
   startQuizTimer();
@@ -1466,7 +1560,7 @@ function renderQuestion() {
 
   const choices = buildChoices(q.correct, q.wrongs);
   document.getElementById('quizChoices').innerHTML = choices.map(c => `
-    <button class="quiz-choice" onclick="selectAnswer(this,'${c.raw.replace(/'/g,"\\'")}')">
+    <button class="quiz-choice" data-raw="${String(c.raw).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" onclick="selectAnswer(this,this.dataset.raw)">
       ${c.label}
     </button>`).join('');
 }
@@ -1478,13 +1572,9 @@ function selectAnswer(btn, answer) {
   const q = quizList[quizIndex];
   const isCorrect = answer === q.correct;
 
-  // translate a raw answer token to display text
-  const TOKENS = { TRUE:{en:'True',ar:'صح'}, FALSE:{en:'False',ar:'خطأ'}, DIST_CENTER:{en:'Distance from center to tube',ar:'مسافة من المركز للأنبوب'}, THICK_TUBE:{en:'Thickness of tube',ar:'سُمك الأنبوب'}, RING_LEN:{en:'Length of ring',ar:'طول الحلقة'}, HALF_RING:{en:'Half the ring radius',ar:'نصف قطر الحلقة'}, GLASS_PRISM:{en:'Glass prism',ar:'المنشور الزجاجي'}, CUBE_ANS:{en:'Cube',ar:'المكعب'}, SPHERE_ANS:{en:'Sphere',ar:'الكرة'}, CYLINDER_ANS:{en:'Cylinder',ar:'الأسطوانة'} };
-  function displayVal(v) { return TOKENS[v] ? TOKENS[v][currentLang] : v; }
-
   // highlight correct button green, wrong button red
   document.querySelectorAll('.quiz-choice').forEach(b => {
-    const raw = b.getAttribute('onclick').match(/'([^']+)'/)?.[1] || '';
+    const raw = b.dataset.raw || '';
     if (raw === q.correct) b.classList.add('correct');
     else if (b === btn && !isCorrect) b.classList.add('wrong');
   });
@@ -1497,7 +1587,7 @@ function selectAnswer(btn, answer) {
     soundCorrect();
     showFeedbackOverlay(true);
   } else {
-    document.getElementById('quizFeedback').textContent = t('quizWrong', displayVal(q.correct));
+    document.getElementById('quizFeedback').textContent = t('quizWrong', answerLabel(q.correct));
     document.getElementById('quizFeedback').className   = 'quiz-feedback bad';
     soundWrong();
     showFeedbackOverlay(false);
@@ -1591,23 +1681,37 @@ document.addEventListener('touchend', () => { isDragging = false; });
 // ─────────────────────────────────────────────
 // CAMERA FIX
 // ─────────────────────────────────────────────
-window.addEventListener('load', () => {
-  const checkV = setInterval(() => {
-    const v = document.querySelector('video');
-    if (v) {
-      v.style.cssText = 'position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;object-fit:cover!important;z-index:0!important;';
-      clearInterval(checkV);
-    }
-  }, 100);
+function syncCameraLayers() {
+  const width = Math.ceil(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth);
+  const height = Math.ceil(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight);
+  const fillStyle = `position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;width:${width}px!important;height:${height}px!important;min-width:${width}px!important;min-height:${height}px!important;`;
 
-  const checkC = setInterval(() => {
-    const canvases = document.querySelectorAll('canvas');
-    if (canvases.length > 0) {
-      canvases.forEach(c => { c.style.zIndex = '1'; c.style.position = 'fixed'; c.style.top = '0'; c.style.left = '0'; });
-      clearInterval(checkC);
+  document.querySelectorAll('video').forEach(v => {
+    v.style.cssText = `${fillStyle}object-fit:cover!important;z-index:0!important;background:#000!important;`;
+  });
+
+  document.querySelectorAll('canvas').forEach(c => {
+    c.style.cssText = `${fillStyle}z-index:1!important;pointer-events:none!important;`;
+  });
+
+  const scene = document.querySelector('a-scene');
+  if (scene?.renderer) {
+    scene.renderer.setSize(width, height, false);
+    if (scene.camera) {
+      scene.camera.aspect = width / height;
+      scene.camera.updateProjectionMatrix();
     }
-  }, 100);
+  }
+}
+
+window.addEventListener('load', () => {
+  syncCameraLayers();
+  const layerFix = setInterval(syncCameraLayers, 250);
+  setTimeout(() => clearInterval(layerFix), 5000);
 });
+window.addEventListener('resize', syncCameraLayers);
+window.addEventListener('orientationchange', () => setTimeout(syncCameraLayers, 250));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', syncCameraLayers);
 </script>
 </body>
 </html>
