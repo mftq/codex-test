@@ -386,10 +386,10 @@
     <a-entity id="shapeWrapper">
       <a-entity id="shapeEntity"></a-entity>
     </a-entity>
-    <!-- text labels are outside the wrapper so rotation never affects them -->
-    <a-text id="shapeLabel"  value="" align="center" color="#22D3EE" scale="0.7 0.7 0.7"  position="0 1.5 0"></a-text>
-    <a-text id="dimLabel"    value="" align="center" color="#ffffff"  scale="0.5 0.5 0.5"  position="0 1.25 0"></a-text>
-    <a-text id="resultLabel" value="" align="center" color="#4ADE80"  scale="0.5 0.5 0.5"  position="0 1.05 0"></a-text>
+    <!-- Canvas-text labels render above the shape with depth testing disabled, including Arabic text. -->
+    <a-plane id="shapeLabel"  width="1.8" height="0.22" position="0 1.5 0" visible="false" transparent="true" material="transparent: true; depthTest: false; depthWrite: false; side: double"></a-plane>
+    <a-plane id="dimLabel"    width="1.8" height="0.18" position="0 1.25 0" visible="false" transparent="true" material="transparent: true; depthTest: false; depthWrite: false; side: double"></a-plane>
+    <a-plane id="resultLabel" width="1.8" height="0.18" position="0 1.05 0" visible="false" transparent="true" material="transparent: true; depthTest: false; depthWrite: false; side: double"></a-plane>
   </a-marker>
   <a-entity camera></a-entity>
 </a-scene>
@@ -608,11 +608,7 @@ function applyLang() {
   // if info panel is open, rebuild it in new language
   if (document.getElementById('infoPanel').style.display !== 'none' && selectedShape) {
     buildInfoPanel();
-    // update AR floating text to new language
-    const shape = SHAPES[selectedShape];
-    document.getElementById('shapeLabel').setAttribute('value', shape.name[currentLang]);
-    document.getElementById('dimLabel').setAttribute('value',   shape.label(inputValues));
-    document.getElementById('resultLabel').setAttribute('value',shape.result(inputValues));
+    updateFloatingLabels();
     // if quiz is active, re-render the current question in new language immediately
     if (quizStarted && !quizDone && quizList.length > 0 && quizIndex < quizList.length) {
       renderQuestion();
@@ -1141,6 +1137,69 @@ let inputValues   = {};
 let currentRotX   = 0;
 let currentRotY   = 0;
 
+// ─────────────────────────────────────────────
+// FLOATING AR LABELS
+// Canvas textures keep labels readable above the model, support Arabic,
+// and disable depth testing so labels are never hidden by large shapes.
+// ─────────────────────────────────────────────
+function makeLabelTexture(text, color, fontSize = 78) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.direction = currentLang === 'ar' ? 'rtl' : 'ltr';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  let size = fontSize;
+  const family = "'Nunito', Arial, sans-serif";
+  do {
+    ctx.font = `900 ${size}px ${family}`;
+    if (ctx.measureText(text).width <= canvas.width * 0.9 || size <= 36) break;
+    size -= 4;
+  } while (size > 36);
+
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = 'rgba(13,27,42,0.9)';
+  ctx.lineWidth = Math.max(8, size * 0.12);
+  ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+  ctx.fillStyle = color;
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  return canvas.toDataURL('image/png');
+}
+
+function setFloatingLabel(id, text, color, fontSize, width, height) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.setAttribute('visible', !!text);
+  el.setAttribute('width', width);
+  el.setAttribute('height', height);
+  el.setAttribute('material', {
+    src: makeLabelTexture(text || ' ', color, fontSize),
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    side: 'double'
+  });
+  if (el.object3D) el.object3D.renderOrder = 999;
+}
+
+function updateFloatingLabels() {
+  if (!selectedShape || !inputValues) return;
+  const shape = SHAPES[selectedShape];
+  setFloatingLabel('shapeLabel', shape.name[currentLang], '#22D3EE', 88, 1.9, 0.24);
+  setFloatingLabel('dimLabel', shape.label(inputValues), '#FFFFFF', 74, 1.9, 0.2);
+  setFloatingLabel('resultLabel', shape.result(inputValues), '#4ADE80', 74, 1.9, 0.2);
+}
+
+function clearFloatingLabels() {
+  ['shapeLabel','dimLabel','resultLabel'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.setAttribute('visible', false);
+  });
+}
+
 // quiz state
 let quizList     = [];
 let quizIndex    = 0;
@@ -1245,20 +1304,17 @@ function launchShape() {
   // inject shape
   document.getElementById('shapeEntity').innerHTML = shape.aframe(inputValues);
 
-  // text must sit ABOVE the shape top — shape top = shapeH (since base is at 0)
-  // we add a gap of 0.12 above the top, then stack 3 lines with 0.12 spacing
-  // cap at 1.5 max so text doesn't disappear off camera for huge shapes
-  const shapeTop = Math.min(shape.shapeH(inputValues), 1.2);
-  const textBase  = shapeTop + 0.12;
+  // text must sit ABOVE the true shape top — shape top = shapeH (since base is at 0)
+  // use the real input-derived height so large shapes never cover the labels
+  const shapeTop = shape.shapeH(inputValues);
+  const textBase  = shapeTop + 0.14;
 
   document.getElementById('shapeLabel').setAttribute('position',  `0 ${(textBase + 0.26).toFixed(2)} 0`);
   document.getElementById('dimLabel').setAttribute('position',    `0 ${(textBase + 0.13).toFixed(2)} 0`);
   document.getElementById('resultLabel').setAttribute('position', `0 ${textBase.toFixed(2)} 0`);
 
   // show text in current language
-  document.getElementById('shapeLabel').setAttribute('value',  shape.name[currentLang]);
-  document.getElementById('dimLabel').setAttribute('value',    shape.label(inputValues));
-  document.getElementById('resultLabel').setAttribute('value', shape.result(inputValues));
+  updateFloatingLabels();
 
   rotYaw = 0; rotPitch = 0;
   const wrapper = document.getElementById('shapeWrapper');
@@ -1308,7 +1364,7 @@ function buildInfoPanel() {
 function changeShape() {
   stopQuizTimer();
   document.getElementById('shapeEntity').innerHTML = '';
-  ['shapeLabel','dimLabel','resultLabel'].forEach(id => document.getElementById(id).setAttribute('value',''));
+  clearFloatingLabels();
   document.getElementById('infoPanel').style.display  = 'none';
   document.getElementById('shapePicker').style.display = 'flex';
 }
@@ -1498,12 +1554,13 @@ function retryQuiz() {
 
 // ─────────────────────────────────────────────
 // TOUCH SPIN — rotate shape wrapper by dragging
-// Rotates shapeWrapper (not the shape itself) so text labels never rotate
-// Uses proper trackball math to prevent any distortion
+// Rotates only around the marker's vertical axis. This preserves each model's
+// entered dimensions visually and avoids the pitch/skew distortion that made
+// boxes and other shapes look stretched while dragging.
 // ─────────────────────────────────────────────
 let touchStartX = 0, touchStartY = 0, isDragging = false;
 let rotYaw = 0;    // horizontal rotation (Y axis)
-let rotPitch = 0;  // vertical rotation (X axis)
+let rotPitch = 0;  // kept for launch reset compatibility; dragging no longer pitches shapes
 
 document.addEventListener('touchstart', e => {
   if (e.target.closest('#infoPanel') || e.target.closest('.topbar') ||
@@ -1516,17 +1573,14 @@ document.addEventListener('touchstart', e => {
 document.addEventListener('touchmove', e => {
   if (!isDragging || isResizing) return;
   const dx = e.touches[0].clientX - touchStartX;
-  const dy = e.touches[0].clientY - touchStartY;
 
-  rotYaw   += dx * 0.4;
-  rotPitch += dy * 0.4;
-  // clamp pitch to prevent flipping
-  rotPitch = Math.max(-85, Math.min(85, rotPitch));
+  rotYaw += dx * 0.4;
+  rotPitch = 0;
 
-  // rotate the WRAPPER not the shape — so dimensions stay accurate
-  // and text labels outside wrapper are never affected
+  // rotate the WRAPPER, not the shape, and only yaw it so scale/proportions stay exact
+  // while text labels outside wrapper are never affected
   const wrapper = document.getElementById('shapeWrapper');
-  if (wrapper) wrapper.setAttribute('rotation', `${rotPitch} ${rotYaw} 0`);
+  if (wrapper) wrapper.setAttribute('rotation', `0 ${rotYaw} 0`);
 
   touchStartX = e.touches[0].clientX;
   touchStartY = e.touches[0].clientY;
