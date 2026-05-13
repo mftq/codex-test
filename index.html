@@ -217,12 +217,53 @@
       border-left: 27px solid transparent;
       border-bottom: 43px solid rgba(217,119,6,0.55);
     }
+    .icon-cylinder {
+      width: 38px; height: 54px; border-radius: 50% / 12%;
+      background: linear-gradient(90deg, #15803D 0%, #4ADE80 48%, #16A34A 100%);
+      box-shadow: inset -6px 0 0 rgba(0,0,0,0.14), 0 5px 7px rgba(0,0,0,0.24);
+    }
+    .icon-cylinder::before {
+      content: ''; position: absolute; left: 0; top: -1px;
+      width: 38px; height: 12px; border-radius: 50%;
+      background: radial-gradient(ellipse at 35% 35%, #BBF7D0 0 10%, #4ADE80 45%, #15803D 100%);
+    }
+    .icon-cone {
+      width: 0; height: 0;
+      border-left: 28px solid transparent;
+      border-right: 28px solid transparent;
+      border-bottom: 54px solid #FB923C;
+      filter: drop-shadow(0 5px 5px rgba(0,0,0,0.28));
+    }
+    .icon-cone::after {
+      content: ''; position: absolute; left: -28px; top: 48px;
+      width: 56px; height: 12px; border-radius: 50%;
+      background: radial-gradient(ellipse at center, #FDBA74 0 20%, #FB923C 55%, #C2410C 100%);
+    }
+    .icon-torus {
+      border-radius: 50%;
+      background: radial-gradient(circle at 32% 25%, #DDD6FE 0 9%, #A78BFA 38%, #6D28D9 100%);
+      box-shadow: inset -6px -6px 0 rgba(0,0,0,0.14), 0 5px 7px rgba(0,0,0,0.24);
+    }
+    .icon-torus::after {
+      content: ''; position: absolute; inset: 15px; border-radius: 50%;
+      background: var(--bg);
+      box-shadow: inset 3px 3px 5px rgba(0,0,0,0.32);
+    }
     .icon-prism {
       width: 54px; height: 44px;
       background: linear-gradient(135deg, #F0ABFC, #D946EF 55%, #86198F);
       clip-path: polygon(10% 82%, 48% 10%, 90% 82%);
       filter: drop-shadow(0 5px 5px rgba(0,0,0,0.25));
     }
+    .dim-icon .icon-shape { width: 34px; height: 34px; }
+    .dim-icon .icon-cuboid { width: 42px; height: 26px; }
+    .dim-icon .icon-cylinder { width: 26px; height: 36px; }
+    .dim-icon .icon-cylinder::before { width: 26px; height: 8px; }
+    .dim-icon .icon-cone { width: 0; height: 0; border-left-width: 18px; border-right-width: 18px; border-bottom-width: 36px; }
+    .dim-icon .icon-cone::after { left: -18px; top: 32px; width: 36px; height: 8px; }
+    .dim-icon .icon-pyramid { width: 0; height: 0; border-left-width: 18px; border-right-width: 18px; border-bottom-width: 36px; }
+    .dim-icon .icon-pyramid::after { top: 7px; border-left-width: 17px; border-bottom-width: 29px; }
+    .dim-icon .icon-prism { width: 38px; height: 30px; }
     .shape-name { font-size: 15px; font-weight: 800; }
     .shape-desc { font-size: 11px; color: var(--muted); margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
 
@@ -517,12 +558,12 @@
       <div class="shape-desc" data-key="descSphere">perfectly round</div>
     </div>
     <div class="shape-card" onclick="selectShape('cylinder')">
-      <div class="shape-icon">🥫</div>
+      <div class="shape-icon"><div class="icon-shape icon-cylinder" aria-hidden="true"></div></div>
       <div class="shape-name" data-key="shapeCylinder">Cylinder</div>
       <div class="shape-desc" data-key="descCylinder">2 circular bases</div>
     </div>
     <div class="shape-card" onclick="selectShape('cone')">
-      <div class="shape-icon">🍦</div>
+      <div class="shape-icon"><div class="icon-shape icon-cone" aria-hidden="true"></div></div>
       <div class="shape-name" data-key="shapeCone">Cone</div>
       <div class="shape-desc" data-key="descCone">pointed apex</div>
     </div>
@@ -532,7 +573,7 @@
       <div class="shape-desc" data-key="descPyramid">4 triangular faces</div>
     </div>
     <div class="shape-card" onclick="selectShape('torus')">
-      <div class="shape-icon">🍩</div>
+      <div class="shape-icon"><div class="icon-shape icon-torus" aria-hidden="true"></div></div>
       <div class="shape-name" data-key="shapeTorus">Torus</div>
       <div class="shape-desc" data-key="descTorus">3D ring shape</div>
     </div>
@@ -726,22 +767,68 @@ function showFeedbackOverlay(isCorrect) {
 }
 
 // Shape data and 3D models
-// One centimeter in the math is too big for the phone camera,
-// so CM means: "how large 1 cm should look in AR".
-const CM = 0.07;
-// If the student types a huge number, the shape still shrinks to fit the marker.
-const MAX_VISUAL_SIZE = 0.52;
+// Match the old lab's marker scale: a 5 cm cube becomes about 0.4 AR units,
+// exactly like <a-box scale="0.4 0.4 0.4">.
+const CM = 0.08;
+// Keep very large inputs visible without changing their proportions.
+const MAX_VISUAL_SIZE = 1.0;
+const FIT_START_CM = 10;
+const FIT_SOFTNESS_CM = 7;
 
-// This keeps every shape scalable. Small inputs use the normal CM size,
-// and large inputs use a smaller unit so they do not cover the screen.
-function visualUnitFor(maxCm) {
-  return Math.min(CM, MAX_VISUAL_SIZE / Math.max(+maxCm || 1, 1));
+function visualMaxFor(maxCm) {
+  const cm = Math.max(+maxCm || 1, 1);
+  if (cm <= FIT_START_CM) return cm * CM;
+  const startSize = FIT_START_CM * CM;
+  const extraFit = 1 - Math.exp(-(cm - FIT_START_CM) / FIT_SOFTNESS_CM);
+  return Math.min(MAX_VISUAL_SIZE, startSize + (MAX_VISUAL_SIZE - startSize) * extraFit);
 }
+
+// This keeps every shape scalable and accurate: all axes use the same unit,
+// so a 5×5×5 cube is rendered as a real cube, not a stretched box.
+function visualUnitFor(maxCm) {
+  const cm = Math.max(+maxCm || 1, 1);
+  return visualMaxFor(cm) / cm;
+}
+
+function shapeIconHTML(key) {
+  const cls = SHAPES[key]?.iconClass;
+  return cls ? `<div class="icon-shape ${cls}" aria-hidden="true"></div>` : '';
+}
+
+AFRAME.registerComponent('triangular-prism', {
+  schema: {
+    base: {type: 'number', default: 0.4},
+    triHeight: {type: 'number', default: 0.3},
+    length: {type: 'number', default: 0.6},
+    color: {type: 'color', default: '#D946EF'},
+    opacity: {type: 'number', default: 0.9}
+  },
+  init: function () { this.build(); },
+  update: function () { this.build(); },
+  build: function () {
+    const d = this.data, b = d.base, th = d.triHeight, l = d.length;
+    const x0 = -b / 2, x1 = b / 2, z0 = -th / 3, z1 = (2 * th) / 3;
+    const verts = [
+      x0,0,z0, x1,0,z0, 0,0,z1,
+      x0,l,z0, x1,l,z0, 0,l,z1
+    ];
+    const idx = [0,1,2, 3,5,4, 0,3,4, 0,4,1, 1,4,5, 1,5,2, 2,5,3, 2,3,0];
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({color: d.color, transparent: true, opacity: d.opacity, side: THREE.DoubleSide});
+    if (this.mesh) { this.mesh.geometry.dispose(); this.mesh.material.dispose(); this.el.removeObject3D('mesh'); }
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.el.setObject3D('mesh', this.mesh);
+  },
+  remove: function () { if (this.mesh) { this.el.removeObject3D('mesh'); this.mesh.geometry.dispose(); this.mesh.material.dispose(); } }
+});
 
 const SHAPES = {
 
   cube: {
-    name: { en: 'Cube', ar: 'مكعب' }, icon: '🟦',
+    name: { en: 'Cube', ar: 'مكعب' }, iconClass: 'icon-cube',
     inputs: [
       { key:'a', label:{ en:'Side Length (cm)', ar:'طول الضلع (سم)' }, placeholder:'5' }
     ],
@@ -804,17 +891,15 @@ const SHAPES = {
   },
 
   sphere: {
-    name: { en: 'Sphere', ar: 'كرة' }, icon: '🟡',
+    name: { en: 'Sphere', ar: 'كرة' }, iconClass: 'icon-sphere',
     inputs: [
       { key:'r', label:{ en:'Radius (cm)', ar:'نصف القطر (سم)' }, placeholder:'4' }
     ],
-    // Sphere: one radius in every direction.
-    // The marker camera stretches round objects a little on many phones,
-    // so the Y scale is slightly smaller to make it look round on screen.
+    // Sphere: one radius in every direction. No non-uniform scale, so it stays round.
     aframe: (v) => {
       const unit = visualUnitFor((+v.r || 1) * 2);
       const r = +v.r * unit;
-      return `<a-sphere radius="${r}" color="#FBBF24" opacity="0.9" position="0 ${(r*0.88).toFixed(3)} 0" scale="1 0.88 1" segments-width="64" segments-height="48"></a-sphere>`;
+      return `<a-sphere radius="${r}" color="#FBBF24" opacity="0.9" position="0 ${r.toFixed(3)} 0" scale="1 1 1" segments-width="64" segments-height="48"></a-sphere>`;
     },
     stats: (v) => {
       const r=+v.r, pi=Math.PI;
@@ -861,13 +946,13 @@ const SHAPES = {
         { q:{en:`A great circle cuts a sphere into two equal halves. True or False?`,ar:'الدائرة الكبرى تقسم الكرة إلى نصفين متساويين. صح أم خطأ؟'}, correct:'TRUE', wrongs:['FALSE'] },
       ];
     },
-    shapeH: (v) => +v.r * visualUnitFor((+v.r || 1) * 2) * 2 * 0.88,
+    shapeH: (v) => +v.r * visualUnitFor((+v.r || 1) * 2) * 2,
     label:  (v) => `r = ${v.r} cm`,
     result: (v) => { const r=+v.r,pi=Math.PI; return `V=${((4/3)*pi*r*r*r).toFixed(1)}cm³`; },
   },
 
   cylinder: {
-    name: { en: 'Cylinder', ar: 'أسطوانة' }, icon: '🥫',
+    name: { en: 'Cylinder', ar: 'أسطوانة' }, iconClass: 'icon-cylinder',
     inputs: [
       { key:'r', label:{ en:'Radius (cm)',  ar:'نصف القطر (سم)' }, placeholder:'3' },
       { key:'h', label:{ en:'Height (cm)',  ar:'الارتفاع (سم)'  }, placeholder:'8' },
@@ -929,7 +1014,7 @@ const SHAPES = {
   },
 
   cone: {
-    name: { en: 'Cone', ar: 'مخروط' }, icon: '🍦',
+    name: { en: 'Cone', ar: 'مخروط' }, iconClass: 'icon-cone',
     inputs: [
       { key:'r', label:{ en:'Base Radius (cm)', ar:'نصف قطر القاعدة (سم)' }, placeholder:'3' },
       { key:'h', label:{ en:'Height (cm)',       ar:'الارتفاع (سم)'        }, placeholder:'7' },
@@ -990,7 +1075,7 @@ const SHAPES = {
   },
 
   pyramid: {
-    name: { en: 'Pyramid', ar: 'هرم' }, icon: '🔻',
+    name: { en: 'Pyramid', ar: 'هرم' }, iconClass: 'icon-pyramid',
     inputs: [
       { key:'b', label:{ en:'Base Side (cm)', ar:'ضلع القاعدة (سم)' }, placeholder:'6' },
       { key:'h', label:{ en:'Height (cm)',    ar:'الارتفاع (سم)'    }, placeholder:'8' },
@@ -1052,7 +1137,7 @@ const SHAPES = {
   },
 
   torus: {
-    name: { en: 'Torus', ar: 'حلقي' }, icon: '🍩',
+    name: { en: 'Torus', ar: 'حلقي' }, iconClass: 'icon-torus',
     inputs: [
       { key:'R', label:{ en:'Major Radius (cm)', ar:'نصف القطر الكبير (سم)' }, placeholder:'5' },
       { key:'r', label:{ en:'Minor Radius (cm)', ar:'نصف القطر الصغير (سم)' }, placeholder:'2' },
@@ -1116,7 +1201,7 @@ const SHAPES = {
   },
 
   rectangle: {
-    name: { en: 'Cuboid', ar: 'متوازي مستطيلات' }, icon: '🧱',
+    name: { en: 'Cuboid', ar: 'متوازي مستطيلات' }, iconClass: 'icon-cuboid',
     inputs: [
       { key:'l', label:{ en:'Length (cm)', ar:'الطول (سم)'  }, placeholder:'8' },
       { key:'w', label:{ en:'Width (cm)',  ar:'العرض (سم)'  }, placeholder:'5' },
@@ -1181,7 +1266,7 @@ const SHAPES = {
   },
 
   prism: {
-    name: { en: 'Tri. Prism', ar: 'منشور مثلثي' }, icon: '🔶',
+    name: { en: 'Tri. Prism', ar: 'منشور مثلثي' }, iconClass: 'icon-prism',
     inputs: [
       { key:'a', label:{ en:'Triangle Base (cm)',   ar:'قاعدة المثلث (سم)'  }, placeholder:'6' },
       { key:'b', label:{ en:'Triangle Height (cm)', ar:'ارتفاع المثلث (سم)' }, placeholder:'5' },
@@ -1189,8 +1274,8 @@ const SHAPES = {
     ],
     aframe: (v) => {
       const unit = visualUnitFor(Math.max(+v.a || 1, +v.b || 1, +v.l || 1));
-      const r=+v.a*unit*0.6, h=+v.l*unit;
-      return `<a-cylinder radius="${r}" height="${h}" color="#D946EF" opacity="0.9" segments-radial="3" position="0 ${(h/2).toFixed(3)} 0" scale="1 1 1"></a-cylinder>`;
+      const base = +v.a * unit, triH = +v.b * unit, len = +v.l * unit;
+      return `<a-entity triangular-prism="base: ${base}; triHeight: ${triH}; length: ${len}; color: #D946EF; opacity: 0.9" position="0 0 0" scale="1 1 1"></a-entity>`;
     },
     stats: (v) => {
       const a=+v.a, b=+v.b, l=+v.l, tri=0.5*a*b, hyp=Math.sqrt(a*a+b*b);
@@ -1358,7 +1443,7 @@ function selectShape(key) {
   selectedShape = key;
   const shape = SHAPES[key];
 
-  document.getElementById('dimIcon').textContent  = shape.icon;
+  document.getElementById('dimIcon').innerHTML = shapeIconHTML(key);
   document.getElementById('dimTitle').textContent = shape.name[currentLang];
 
   const inputsDiv = document.getElementById('dimInputs');
